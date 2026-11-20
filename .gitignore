@@ -39,6 +39,9 @@ smoketest/backup.json
 # 压缩包
 *.zip
 
+# 本地临时文件
+_preview.ps1
+
 # 系统
 .DS_Store
 Thumbs.db
