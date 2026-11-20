@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui.theme
+package com.example.mydb.ui.theme
 
 import android.app.Activity
 import androidx.compose.material3.MaterialTheme

@@ -1,4 +1,4 @@
-package com.example.mementoclone.data
+package com.example.mydb.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 class Store(context: Context) {
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("memento_store", Context.MODE_PRIVATE)
+        context.getSharedPreferences("mydb_store", Context.MODE_PRIVATE)
 
     fun load(): Pair<MState, Boolean> {
         val raw = prefs.getString(KEY_STATE, null)

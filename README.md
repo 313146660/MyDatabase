@@ -1,6 +1,6 @@
 # MyDatabase
 
-一个面向眼镜店/视光工作室的**客户档案 + 镜片库存**管理工具。先做网页原型确认交互，再 1:1 移植到 Android（Jetpack Compose），数据完全保存在本机，不依赖任何后端。
+一个面向眼镜店/视光工作室的**客户档案 + 镜片库存**管理工具，Android 原生实现（Jetpack Compose），数据完全保存在本机，不依赖任何后端。
 
 > 仓库里只有代码和虚构的演示数据，不包含任何真实客户信息。
 
@@ -34,25 +34,10 @@
 
 ```
 .
-├─ web/                 零依赖网页原型（HTML + CSS + 原生 JS）
-│  ├─ index.html        入口，双击即可运行
-│  ├─ app.js            全部逻辑
-│  └─ styles.css        设计系统与布局
 └─ android/             Android App（Jetpack Compose，Kotlin）
    ├─ app/              界面、数据层、备份、CSV
    └─ smoketest/        数据层 JVM 自测入口
 ```
-
-## 网页原型
-
-无需 npm、无需构建：
-
-```bash
-# 直接用浏览器打开
-web/index.html
-```
-
-首次打开会写入 5 个演示库到 `localStorage`。数据只存在当前浏览器，清站点数据会丢失；重要数据请用页面里的「备份与恢复」导出。
 
 ## Android 构建
 
@@ -77,11 +62,10 @@ sdk.dir=/path/to/Android/Sdk
 
 - **不要提交**：真实备份 JSON、`客户.csv`、`local.properties`、签名文件。`.gitignore` 已覆盖常见情况。
 - 备份格式为 JSON，`version: 2 / schemaVersion: 2`，同时兼容旧版 v1 与裸 state。
-- 网页原型里的 8 位手机号、姓名均为虚构演示数据（`138000000xx` / 陈晓明等），仅用于展示家庭组和历史记录。
+- App 首次启动生成的演示姓名、手机号均为虚构（如 陈晓明 / `138000000xx`），仅用于展示家庭组和历史记录。
 
 ## 已知限制
 
-- `applicationId` 仍是 `com.example.mementoclone`，属于早期占位；改名会导致已装应用的数据隔离，需要先导出备份再迁移。
 - 没有崩溃上报、没有多设备同步；WebDAV 是唯一的内置云备份方式。
 - UI 以中文为主，代码注释为中文。
 
@@ -91,4 +75,4 @@ sdk.dir=/path/to/Android/Sdk
 
 ## 声明
 
-本项目是独立实现，与 Memento Database 及其开发商无关。早期内部名称中出现过 Memento，目录名、主题名、类名、UI 显示文字、备份主文件名均已替换为 MyDB。仅以下字符串为升级兼容保留：包名 `com.example.mementoclone`（改名会导致已装应用数据隔离）、旧备份文件名 `memento-backup.json`（恢复时作为回退读取，避免老云端备份失效）、以及本地存储键名前缀。这些保留不涉及商标授权，迁移前请先导出备份。
+本项目是独立实现，与 Memento Database 及其开发商无关。早期内部名称中出现过 Memento，现目录名、包名、主题名、类名、UI 显示文字、备份主文件名、本地存储键名均已替换为 MyDB。仅旧备份文件名 `memento-backup.json` 为升级兼容保留——恢复时若找不到新文件 `mydb-backup.json`，会回退读取它，避免老云端备份失效。此保留不涉及商标授权。

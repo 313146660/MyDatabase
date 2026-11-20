@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui.screens
+package com.example.mydb.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,9 +33,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.mementoclone.data.*
-import com.example.mementoclone.ui.*
-import com.example.mementoclone.ui.theme.*
+import com.example.mydb.data.*
+import com.example.mydb.ui.*
+import com.example.mydb.ui.theme.*
 import kotlin.math.abs
 import kotlin.math.roundToInt
 

@@ -1,15 +1,15 @@
 package smoke
 
-import com.example.mementoclone.data.*
+import com.example.mydb.data.*
 import org.json.JSONObject
 import java.io.File
 
 fun main() {
     // 数据层自测需要一个真实备份文件；不把任何个人数据提交进仓库。
-    val path = System.getenv("MEMENTO_BACKUP") ?: "smoketest/backup.json"
+    val path = System.getenv("MYDB_BACKUP") ?: "smoketest/backup.json"
     val file = File(path)
     if (!file.exists()) {
-        println("SKIP: put a backup at smoketest/backup.json or set MEMENTO_BACKUP=/path/to/backup.json")
+        println("SKIP: put a backup at smoketest/backup.json or set MYDB_BACKUP=/path/to/backup.json")
         return
     }
     val text = file.readText(Charsets.UTF_8)

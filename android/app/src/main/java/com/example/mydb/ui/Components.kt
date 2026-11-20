@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui
+package com.example.mydb.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,8 +29,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.mementoclone.data.MLibrary
-import com.example.mementoclone.ui.theme.*
+import com.example.mydb.data.MLibrary
+import com.example.mydb.ui.theme.*
 
 fun hexColor(hex: String?): Color {
     val h = (hex ?: "#1976D2").removePrefix("#")

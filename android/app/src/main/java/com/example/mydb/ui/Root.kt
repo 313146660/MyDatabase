@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui
+package com.example.mydb.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -19,8 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.mementoclone.ui.screens.*
-import com.example.mementoclone.ui.theme.*
+import com.example.mydb.ui.screens.*
+import com.example.mydb.ui.theme.*
 
 @Composable
 fun AppRoot(vm: AppViewModel) {

@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui
+package com.example.mydb.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf

@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui.screens
+package com.example.mydb.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,9 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.mementoclone.data.*
-import com.example.mementoclone.ui.*
-import com.example.mementoclone.ui.theme.*
+import com.example.mydb.data.*
+import com.example.mydb.ui.*
+import com.example.mydb.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

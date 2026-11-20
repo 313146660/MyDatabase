@@ -1,4 +1,4 @@
-package com.example.mementoclone
+package com.example.mydb
 
 import android.app.Application
 

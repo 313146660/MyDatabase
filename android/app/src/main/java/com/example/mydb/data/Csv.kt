@@ -1,4 +1,4 @@
-package com.example.mementoclone.data
+package com.example.mydb.data
 
 data class CsvTable(val headers: List<String>, val rows: List<List<String>>)
 

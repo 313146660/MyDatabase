@@ -5,10 +5,10 @@ plugins {
 }
 
 android {
-    namespace = "com.example.mementoclone"
+    namespace = "com.example.mydb"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.example.mementoclone"
+        applicationId = "com.example.mydb"
         minSdk = 26
         targetSdk = 34
         versionCode = 11

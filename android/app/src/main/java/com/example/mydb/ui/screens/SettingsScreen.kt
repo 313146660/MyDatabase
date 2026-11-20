@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui.screens
+package com.example.mydb.ui.screens
 
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,9 +26,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.mementoclone.data.*
-import com.example.mementoclone.ui.*
-import com.example.mementoclone.ui.theme.*
+import com.example.mydb.data.*
+import com.example.mydb.ui.*
+import com.example.mydb.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

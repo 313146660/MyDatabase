@@ -1,4 +1,4 @@
-package com.example.mementoclone.data
+package com.example.mydb.data
 
 import kotlin.math.abs
 import kotlin.math.roundToInt

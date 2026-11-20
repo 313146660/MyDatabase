@@ -1,4 +1,4 @@
-package com.example.mementoclone.data
+package com.example.mydb.data
 
 import java.text.SimpleDateFormat
 import java.util.Calendar

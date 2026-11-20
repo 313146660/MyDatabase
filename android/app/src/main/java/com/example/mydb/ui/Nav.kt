@@ -1,4 +1,4 @@
-package com.example.mementoclone.ui
+package com.example.mydb.ui
 
 sealed interface Scr {
     data object Home : Scr
