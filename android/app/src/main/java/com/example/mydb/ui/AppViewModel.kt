@@ -51,6 +51,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var dark by mutableStateOf(false)
         private set
 
+    /** 指纹解锁开关：开启后冷启动、或从后台超过 30 秒返回时需要验证指纹。 */
+    var lockEnabled by mutableStateOf(false)
+        private set
+
+    var locked by mutableStateOf(false)
+        private set
+
+    /** 解锁密码（salt:hash），空 = 未设置；作为指纹失效时的兜底 */
+    var lockPassword by mutableStateOf("")
+        private set
+
     var globalFont by mutableStateOf(14)
         private set
 
@@ -87,6 +98,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val bkJson = withContext(Dispatchers.IO) { store.getBk() }
 
             dark = s.optBoolean("darkMode", false)
+            lockEnabled = android.os.Build.VERSION.SDK_INT >= 28 && s.optBoolean("lockEnabled", false)
+            // 只保存 salt:SHA-256 摘要，不保存明文
+            lockPassword = s.optString("lockPassword", "")
+            locked = lockEnabled || lockPassword.isNotEmpty()
             globalFont = (s.optInt("listFontSize", 14)).coerceIn(10, 26)
             Palette.apply(dark)
             AppPrefs.listFontSize = globalFont
@@ -153,6 +168,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ensureAllMeta()
             rev++
             booting = false
+            scheduleWarm()
+        }
+    }
+
+    /** 后台预热派生缓存（列表 / 聚合），进入列表时直接命中，不占主线程 */
+    private var warmJob: Job? = null
+
+    private fun scheduleWarm() {
+        warmJob?.cancel()
+        val libs = state.libraries
+        warmJob = viewModelScope.launch(Dispatchers.Default) {
+            delay(200)
+            runCatching {
+                libs.forEach { lib ->
+                    if (lib.entries.isEmpty()) return@forEach
+                    phoneNamesOf(lib)
+                    familyCountOf(lib)
+                    listView(lib, lib.sort ?: "visit_desc", "", "all")
+                    if (phoneFieldOf(lib) != null) {
+                        overduePhoneCount(lib)
+                        customerGroups(lib, "phone", "", true, "last_desc")
+                    }
+                }
+            }
         }
     }
 
@@ -177,11 +216,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         store.saveSettings(
             JSONObject().put("darkMode", dark).put("listFontSize", globalFont)
+                .put("lockEnabled", lockEnabled)
+                .put("lockPassword", lockPassword)
                 .put("batchPresets", arr).put("searchHistory", hist)
                 .put("restockHistory", restockHistoryToJson(restockHistory))
                 .put("custViews", cvs)
         )
     }
+
+    fun setFingerprintLock(v: Boolean) {
+        if (lockEnabled == v) return
+        lockEnabled = v
+        locked = false
+        persistSettings()
+    }
+
+    fun unlock() { locked = false }
+
+    fun lockNow() { if (lockEnabled || lockPassword.isNotEmpty()) locked = true }
+
+    /** 设置解锁密码；传 null 或空串表示清除。 */
+    fun applyLockPassword(pw: String?) {
+        lockPassword = if (pw.isNullOrEmpty()) "" else {
+            val salt = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+            "$salt:${sha256(salt + pw)}"
+        }
+        locked = false
+        persistSettings()
+    }
+
+    fun verifyPassword(pw: String): Boolean {
+        val parts = lockPassword.split(":")
+        if (parts.size != 2) return false
+        return sha256(parts[0] + pw) == parts[1]
+    }
+
+    private fun sha256(s: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(s.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     fun addSearchQuery(libId: String, raw: String) {
         val q = raw.trim()
@@ -302,6 +375,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             delay(350)
             val json = withContext(Dispatchers.IO) { state.toJson().toString() }
             store.commitJson(json)
+            scheduleWarm()
         }
         if (bk.auto && bk.url.isNotBlank()) {
             cloudJob?.cancel()

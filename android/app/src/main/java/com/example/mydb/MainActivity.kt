@@ -14,6 +14,7 @@ import com.example.mydb.ui.theme.MyDBTheme
 
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
+    private var stoppedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,6 +30,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         vm.saveNow()
+        stoppedAt = System.currentTimeMillis()
         super.onStop()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // 后台超过 30 秒返回时重新上锁，避免选文件、分享等短时切换反复验证指纹
+        if (stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 30_000) vm.lockNow()
     }
 }

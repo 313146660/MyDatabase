@@ -147,28 +147,16 @@ private fun ListContent(
     val color = hexColor(lib.color)
     val phoneField = phoneFieldOf(lib)
     val nameField = nameFieldOf(lib)
-    val dataKey = lib.entries.size * 31L + (lib.entries.maxOfOrNull { it.updatedAt } ?: 0L)
 
-    // 首次同步计算（首帧秒出完整数据），之后 dataKey 不变则 remember cache 命中
-    val phoneNames = remember(lib.id, dataKey) {
-        val map = HashMap<String, MutableSet<String>>()
-        if (phoneField != null && nameField != null) {
-            lib.entries.forEach { e ->
-                val p = normPhone(e.values[phoneField.id])
-                if (p.isEmpty()) return@forEach
-                val n = nameOf(lib, e)
-                if (n.isNotEmpty()) map.getOrPut(p) { mutableSetOf() }.add(n)
-            }
-        }
-        map
-    }
+    // 派生数据由 Ops 层缓存（跨页面存活），进入列表不再重复计算
+    val phoneNames = phoneNamesOf(lib)
     fun isFamily(e: MEntry): Boolean {
         if (phoneField == null || nameField == null) return false
         val set = phoneNames[normPhone(e.values[phoneField.id])]
         return set != null && set.size > 1
     }
-    val familyCount = remember(lib.id, dataKey) { lib.entries.count { isFamily(it) } }
-    val favCount = remember(lib.id, dataKey) { lib.entries.count { it.favorite } }
+    val familyCount = familyCountOf(lib)
+    val favCount = lib.entries.count { it.favorite }
 
     val sort = lib.sort ?: "visit_desc"
     val sortOptions = listOf(
@@ -185,22 +173,7 @@ private fun ListContent(
         filtQuery = query
     }
 
-    val collator = remember { java.text.Collator.getInstance(java.util.Locale.CHINA) }
-    val all = remember(lib.id, sort, filtQuery, filter, dataKey) {
-        val filtered = lib.entries.filter { entryMatches(lib, it, filtQuery) }
-            .let { list ->
-                if (filter == "fav") list.filter { it.favorite }
-                else if (filter == "family") list.filter { isFamily(it) }
-                else list
-            }
-        when (sort) {
-            "updated_desc" -> filtered.sortedByDescending { it.updatedAt }
-            "visit_asc" -> filtered.sortedWith(compareBy<MEntry> { visitDate(lib, it) ?: Long.MAX_VALUE }.thenByDescending { it.updatedAt })
-            "name_asc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, a), titleOf(lib, b)) }
-            "name_desc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, b), titleOf(lib, a)) }
-            else -> filtered.sortedWith(compareByDescending<MEntry> { visitDate(lib, it) ?: 0L }.thenByDescending { it.updatedAt })
-        }
-    }
+    val all = listView(lib, sort, filtQuery, filter)
     val history = vm.searchHistory[lib.id].orEmpty()
     var sortMenu by remember { mutableStateOf(false) }
     // 客户视图偏好存在 ViewModel 里，离开客户库再进来不会被重置
@@ -220,8 +193,10 @@ private fun ListContent(
     val activeSortKey = if (custMode) cv.sort else sort
     val sortLabel = activeSortOptions.firstOrNull { it.first == activeSortKey }?.second
         ?: activeSortOptions.first().second
-    val overdueCount = remember(lib.id, dataKey) { overduePhoneCount(lib) }
-    val customerGroupsFiltered = remember(lib.id, custBy, filtQuery, overduePinned, cv.sort, dataKey, filter) {
+    // 只有客户模式才需要聚合与超期统计，记录模式下完全跳过
+    val custActive = custMode && phoneField != null
+    val overdueCount = if (custActive) overduePhoneCount(lib) else 0
+    val customerGroupsFiltered = if (!custActive) emptyList() else {
         val raw = customerGroups(lib, custBy, filtQuery, overduePinned, cv.sort)
         when (filter) {
             "fav" -> raw.filter { g -> g.entries.any { it.favorite } }
@@ -233,92 +208,113 @@ private fun ListContent(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item {
             Column(
-                Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(Brush.linearGradient(listOf(color.copy(alpha = 0.85f), color)))
-                    .padding(16.dp)
+                    .padding(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
-                        Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.2f)),
+                        Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(Color.White.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
-                    ) { AppIcon(lib.icon, 21.dp, Color.White) }
-                    Spacer(Modifier.width(11.dp))
+                    ) { AppIcon(lib.icon, 17.dp, Color.White) }
+                    Spacer(Modifier.width(9.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(lib.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("${lib.entries.size} 条记录，最近一次 ${latestStamp(lib)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.82f))
+                        Text(lib.name, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("最近一次 ${latestStamp(lib)}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.82f))
                     }
                     Row(
-                        Modifier.clip(RoundedCornerShape(10.dp))
+                        Modifier.clip(RoundedCornerShape(9.dp))
                             .background(Color.White.copy(alpha = 0.22f))
                             .clickable { vm.go(Scr.Stats(lib.id)) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        AppIcon("chart", 13.dp, Color.White.copy(alpha = 0.9f))
-                        Spacer(Modifier.width(4.dp))
-                        Text("统计", fontSize = 11.sp, color = Color.White.copy(alpha = 0.92f), fontWeight = FontWeight.SemiBold)
+                        AppIcon("chart", 12.dp, Color.White.copy(alpha = 0.9f))
+                        Spacer(Modifier.width(3.dp))
+                        Text("统计", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.92f), fontWeight = FontWeight.SemiBold)
+                    }
+                    if (custActive && overdueCount > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        Row(
+                            Modifier.clip(RoundedCornerShape(9.dp))
+                                .background(if (overduePinned) Color.White else Color.White.copy(alpha = 0.16f))
+                                .clickable { vm.updateCustView(lib.id) { it.copy(pinned = !it.pinned) } }
+                                .padding(horizontal = 7.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                "超期 $overdueCount${if (overduePinned) " · 置顶" else ""}",
+                                fontSize = 9.5.sp,
+                                color = if (overduePinned) Danger else Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
                 // 数据条：记录 / 字段 / 收藏，三等分居中
                 Row(
                     Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(Color.White.copy(alpha = 0.14f))
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     InfoStat("${lib.entries.size}", "条记录", Modifier.weight(1f))
                     InfoStat("${lib.fields.size}", "个字段", Modifier.weight(1f))
                     InfoStat("$favCount", "个收藏", Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(8.dp))
-                // 排序铺满整行；客户模式下与超期提醒各占一半
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.weight(1f)) {
-                        InfoButton("排序 · $sortLabel", "sliders", Modifier.fillMaxWidth()) { sortMenu = true }
-                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                            activeSortOptions.forEach { (key, label) ->
-                                DropdownMenuItem(text = { Text(label) }, onClick = {
-                                    sortMenu = false
-                                    if (custMode) vm.updateCustView(lib.id) { it.copy(sort = key) }
-                                    else vm.setSort(lib.id, key)
-                                })
-                            }
-                        }
-                    }
-                    if (custMode && overdueCount > 0) {
-                        Box(Modifier.weight(1f)) {
-                            InfoButton(
-                                "超期 $overdueCount${if (overduePinned) " · 置顶" else ""}",
-                                "bell", Modifier.fillMaxWidth(), inverted = overduePinned
-                            ) { vm.updateCustView(lib.id) { it.copy(pinned = !it.pinned) } }
-                        }
-                    }
-                }
             }
         }
-        if (phoneField != null) item {
+        item {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SegButton("记录", !custMode, Modifier.width(56.dp)) { vm.updateCustView(lib.id) { it.copy(mode = false) } }
-                    SegButton("客户", custMode, Modifier.width(56.dp)) { vm.updateCustView(lib.id) { it.copy(mode = true) } }
+                // 左：排序
+                Box {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(10.dp))
+                            .background(Surface)
+                            .border(1.dp, Line, RoundedCornerShape(10.dp))
+                            .clickable { sortMenu = true }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AppIcon("sliders", 12.dp, Muted2)
+                        Spacer(Modifier.width(3.dp))
+                        Text(sortLabel, fontSize = 10.5.sp, color = TextMain, fontWeight = FontWeight.SemiBold)
+                    }
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        activeSortOptions.forEach { (key, label) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = {
+                                sortMenu = false
+                                if (custMode) vm.updateCustView(lib.id) { it.copy(sort = key) }
+                                else vm.setSort(lib.id, key)
+                            })
+                        }
+                    }
                 }
-                if (custMode) {
-                    Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.weight(1f))
+                if (phoneField != null) {
+                    // 中：记录 / 客户
                     Row(
                         Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SegButton("按电话", custBy == "phone", Modifier.width(62.dp)) { vm.updateCustView(lib.id) { it.copy(by = "phone") } }
-                        SegButton("按姓名", custBy == "name", Modifier.width(62.dp)) { vm.updateCustView(lib.id) { it.copy(by = "name") } }
+                        SegButton("记录", !custMode, Modifier.width(46.dp)) { vm.updateCustView(lib.id) { it.copy(mode = false) } }
+                        SegButton("客户", custMode, Modifier.width(46.dp)) { vm.updateCustView(lib.id) { it.copy(mode = true) } }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    // 右：电话 / 姓名
+                    if (custMode) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SegButton("电话", custBy == "phone", Modifier.width(48.dp)) { vm.updateCustView(lib.id) { it.copy(by = "phone") } }
+                            SegButton("姓名", custBy == "name", Modifier.width(48.dp)) { vm.updateCustView(lib.id) { it.copy(by = "name") } }
+                        }
                     }
                 }
             }
@@ -417,31 +413,10 @@ private fun ListContent(
 
 @Composable
 private fun InfoStat(value: String, label: String, modifier: Modifier = Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text(label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.78f))
-    }
-}
-
-@Composable
-private fun InfoButton(
-    text: String,
-    icon: String,
-    modifier: Modifier = Modifier,
-    inverted: Boolean = false,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier.clip(RoundedCornerShape(10.dp))
-            .background(if (inverted) Color.White else Color.White.copy(alpha = 0.22f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AppIcon(icon, 13.dp, if (inverted) Danger else Color.White.copy(alpha = 0.9f))
-        Spacer(Modifier.width(4.dp))
-        Text(text, fontSize = 11.sp, color = if (inverted) Danger else Color.White, fontWeight = FontWeight.SemiBold)
+    Row(modifier, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        Text(value, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(Modifier.width(3.dp))
+        Text(label, fontSize = 9.5.sp, color = Color.White.copy(alpha = 0.78f))
     }
 }
 

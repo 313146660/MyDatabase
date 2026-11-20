@@ -851,7 +851,7 @@ data class CustomerGroup(
 )
 
 /** 按电话或姓名聚合客户记录。query 非空时只保留组内任一记录命中搜索的组。overdueFirst=true 时超期客户排最前。 */
-fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: Boolean = true, sortKey: String = "last_desc"): List<CustomerGroup> {
+fun customerGroupsCalc(lib: MLibrary, by: String, query: String = "", overdueFirst: Boolean = true, sortKey: String = "last_desc"): List<CustomerGroup> {
     val pf = phoneFieldOf(lib)
     val nf = nameFieldOf(lib)
     val mf = moneyFieldOf(lib)
@@ -916,6 +916,94 @@ fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: 
         base
     }
 }
+
+/* ---------------- 派生结果缓存：跨页面存活，避免每次进入列表重算 ---------------- */
+
+private object DeriveCache {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    private val order = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    @Suppress("UNCHECKED_CAST")
+    fun <T : Any> get(key: String, block: () -> T): T {
+        (map[key] as? T)?.let { return it }
+        val v = block()
+        if (map.putIfAbsent(key, v) == null) {
+            order.add(key)
+            while (order.size > 24) {
+                val old = order.poll() ?: break
+                map.remove(old)
+            }
+        }
+        return v
+    }
+}
+
+/** 库数据指纹：记录数、最近修改时间、id 与收藏位哈希，任一变化都会让派生缓存失效 */
+fun libDataKey(lib: MLibrary): Long {
+    var h = lib.entries.size.toLong()
+    var maxUpd = 0L
+    lib.entries.forEach {
+        if (it.updatedAt > maxUpd) maxUpd = it.updatedAt
+        h = h * 31 + it.id.hashCode() + if (it.favorite) 1 else 0
+    }
+    return h * 1_000_003L + maxUpd
+}
+
+/** 电话 → 该电话下出现过的姓名集合（用于识别家庭组） */
+fun phoneNamesOf(lib: MLibrary): Map<String, Set<String>> =
+    DeriveCache.get<Map<String, Set<String>>>("pn|${lib.id}|${libDataKey(lib)}") {
+        val pf = phoneFieldOf(lib)
+        val nf = nameFieldOf(lib)
+        val map = HashMap<String, MutableSet<String>>()
+        if (pf != null && nf != null) {
+            lib.entries.forEach { e ->
+                val p = normPhone(e.values[pf.id])
+                if (p.isEmpty()) return@forEach
+                val n = nameOf(lib, e)
+                if (n.isNotEmpty()) map.getOrPut(p) { mutableSetOf() }.add(n)
+            }
+        }
+        map
+    }
+
+fun familyCountOf(lib: MLibrary): Int =
+    DeriveCache.get("fc|${lib.id}|${libDataKey(lib)}") {
+        val pf = phoneFieldOf(lib)
+        if (pf == null || nameFieldOf(lib) == null) 0
+        else {
+            val names = phoneNamesOf(lib)
+            lib.entries.count { e -> (names[normPhone(e.values[pf.id])]?.size ?: 0) > 1 }
+        }
+    }
+
+/** 记录模式列表：筛选 + 排序，结果按库指纹缓存 */
+fun listView(lib: MLibrary, sort: String, query: String, filter: String): List<MEntry> =
+    DeriveCache.get<List<MEntry>>("lv|${lib.id}|${libDataKey(lib)}|$sort|$query|$filter") {
+        val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
+        val pf = phoneFieldOf(lib)
+        val names = phoneNamesOf(lib)
+        val filtered = lib.entries.filter { entryMatches(lib, it, query) }
+            .let { list ->
+                when (filter) {
+                    "fav" -> list.filter { it.favorite }
+                    "family" -> list.filter { e -> pf != null && (names[normPhone(e.values[pf.id])]?.size ?: 0) > 1 }
+                    else -> list
+                }
+            }
+        when (sort) {
+            "updated_desc" -> filtered.sortedByDescending { it.updatedAt }
+            "visit_asc" -> filtered.sortedWith(compareBy<MEntry> { visitDate(lib, it) ?: Long.MAX_VALUE }.thenByDescending { it.updatedAt })
+            "name_asc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, a), titleOf(lib, b)) }
+            "name_desc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, b), titleOf(lib, a)) }
+            else -> filtered.sortedWith(compareByDescending<MEntry> { visitDate(lib, it) ?: 0L }.thenByDescending { it.updatedAt })
+        }
+    }
+
+/** 客户聚合（带缓存） */
+fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: Boolean = true, sortKey: String = "last_desc"): List<CustomerGroup> =
+    DeriveCache.get("cg|${lib.id}|${libDataKey(lib)}|$by|$query|$overdueFirst|$sortKey") {
+        customerGroupsCalc(lib, by, query, overdueFirst, sortKey)
+    }
 
 /* ---------------- 客户经营看板 ---------------- */
 
@@ -1038,7 +1126,10 @@ fun pickStockViews(state: MState, lib: MLibrary, entry: MEntry): List<PickStockV
 }
 
 /** 轻量统计：按电话分组，最近配镜日期已超用途周期的客户数。比 customerGroups 再 count 省一次完整分组+排序。 */
-fun overduePhoneCount(lib: MLibrary): Int {
+fun overduePhoneCount(lib: MLibrary): Int =
+    DeriveCache.get("ov|${lib.id}|${libDataKey(lib)}") { overduePhoneCountCalc(lib) }
+
+private fun overduePhoneCountCalc(lib: MLibrary): Int {
     val pf = phoneFieldOf(lib) ?: return 0
     val uf = useFieldOf(lib)
     val now = System.currentTimeMillis()

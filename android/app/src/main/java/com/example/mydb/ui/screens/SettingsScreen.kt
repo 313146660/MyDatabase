@@ -45,6 +45,13 @@ fun SettingsScreen(vm: AppViewModel) {
     val rev = vm.rev
     val libs = vm.state.libraries
     val total = libs.sumOf { it.entries.size }
+    var showPwDlg by remember { mutableStateOf(false) }
+    if (showPwDlg) {
+        PasswordDialog(
+            onDismiss = { showPwDlg = false },
+            onConfirm = { vm.applyLockPassword(it); showPwDlg = false; vm.toast("解锁密码已保存") }
+        )
+    }
     Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState())) {
         TopBar("我的")
         Column(Modifier.padding(horizontal = 16.dp)) {
@@ -80,6 +87,51 @@ fun SettingsScreen(vm: AppViewModel) {
                         vm.go(Scr.Library(l.id))
                     }
                     if (i != libs.lastIndex) DividerLine()
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("安全", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+            MCard(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("指纹解锁", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                        Text(
+                            if (android.os.Build.VERSION.SDK_INT >= 28) "打开应用或离开超过 30 秒后需验证指纹"
+                            else "需要 Android 9 及以上系统",
+                            fontSize = 10.5.sp, color = Muted2
+                        )
+                    }
+                    Switch(
+                        checked = vm.lockEnabled,
+                        enabled = android.os.Build.VERSION.SDK_INT >= 28,
+                        onCheckedChange = { vm.setFingerprintLock(it) }
+                    )
+                }
+                DividerLine()
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("解锁密码", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                        Text(
+                            if (vm.lockPassword.isEmpty()) "未设置。指纹失效时可用密码进入"
+                            else "已设置，可替代指纹解锁",
+                            fontSize = 10.5.sp, color = Muted2
+                        )
+                    }
+                    TextButton(onClick = { showPwDlg = true }) {
+                        Text(if (vm.lockPassword.isEmpty()) "设置" else "修改", fontSize = 12.sp)
+                    }
+                    if (vm.lockPassword.isNotEmpty()) {
+                        TextButton(onClick = { vm.applyLockPassword(null); vm.toast("已清除解锁密码") }) {
+                            Text("清除", fontSize = 12.sp, color = Danger)
+                        }
+                    }
                 }
             }
 
@@ -467,4 +519,53 @@ fun CsvScreen(vm: AppViewModel, libId: String) {
             }
         )
     }
+}
+
+@Composable
+private fun PasswordDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var p1 by remember { mutableStateOf("") }
+    var p2 by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置解锁密码") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = p1,
+                    onValueChange = { p1 = it; err = null },
+                    label = { Text("新密码（至少 4 位）") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = p2,
+                    onValueChange = { p2 = it; err = null },
+                    label = { Text("再次输入") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (err != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(err!!, color = Danger, fontSize = 11.sp)
+                } else {
+                    Spacer(Modifier.height(8.dp))
+                    Text("忘记密码将无法进入应用，请务必牢记", fontSize = 10.sp, color = Muted2)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (p1.length < 4) err = "密码至少 4 位"
+                else if (p1 != p2) err = "两次输入不一致"
+                else onConfirm(p1)
+            }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
