@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Memento · 个人数据库</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="stage">
+    <div class="device" id="device">
+      <div class="statusbar">
+        <span class="status-time">9:41</span>
+        <span class="status-icons">
+          <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg>
+          <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 2.2c2.4 0 4.6.9 6.2 2.4l1.1-1.2A10.3 10.3 0 0 0 8 .6 10.3 10.3 0 0 0 .7 3.4l1.1 1.2A8.9 8.9 0 0 1 8 2.2Zm0 3.2c1.5 0 2.9.6 4 1.6l1.1-1.2A7.3 7.3 0 0 0 8 3.8a7.3 7.3 0 0 0-5.1 2l1.1 1.2a5.9 5.9 0 0 1 4-1.6Zm0 3.2c.8 0 1.5.3 2 .8L8 11 6 9.4c.5-.5 1.2-.8 2-.8Z"/></svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="16" height="8" rx="1.6" fill="currentColor"/><path d="M23 4v4c1-.3 1.4-.9 1.4-2S24 4.3 23 4Z" fill="currentColor" opacity=".5"/></svg>
+        </span>
+      </div>
+
+      <div class="app" id="app">
+        <main class="view" id="view"></main>
+        <button class="fab" id="fab" aria-label="新增"></button>
+        <nav class="tabbar" id="tabbar"></nav>
+      </div>
+
+      <div class="home-indicator"></div>
+    </div>
+  </div>
+
+  <div class="sheet-root" id="sheetRoot"></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

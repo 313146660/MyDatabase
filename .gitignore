@@ -1,0 +1,45 @@
+# Android / Gradle
+.gradle/
+build/
+*/build/
+.kotlin/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 签名与密钥
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# 构建产物
+*.apk
+*.aab
+*.ap_
+*.hprof
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+smoketest/*.jar
+
+# 个人数据 / 备份：绝对不要提交
+*.csv
+*.bak
+*.backup
+backup*.json
+memento-backup*.json
+smoketest/backup.json
+*.local.md
+*.local.txt
+.dev-notes/
+
+# 压缩包
+*.zip
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
