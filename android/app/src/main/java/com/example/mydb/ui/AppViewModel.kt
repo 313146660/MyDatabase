@@ -10,8 +10,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mydb.data.*
 import com.example.mydb.ui.theme.Palette
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,6 +24,9 @@ import java.util.Locale
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
+
+    /** 落盘 + 闹钟排程用：不随 viewModelScope / 页面销毁而取消 */
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 启动时先占位，真实数据由 init 中的 IO 协程解析完成后替换。 */
     var state: MState = MState()
@@ -401,9 +406,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveNow() {
         if (booting) return
         saveJob?.cancel()
-        viewModelScope.launch {
-            val json = withContext(Dispatchers.IO) { state.toJson().toString() }
-            store.commitJson(json)
+        // 退到后台时也要把提醒闹钟排上，否则保存后立刻退出会漏掉提醒
+        val snapshot = state
+        bgScope.launch {
+            runCatching { store.commitJson(snapshot.toJson().toString()) }
+            runCatching { Reminders.reschedule(getApplication(), snapshot) }
         }
     }
 
@@ -411,9 +418,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
         if (booting) return
         saveJob?.cancel()
-        viewModelScope.launch {
-            val json = withContext(Dispatchers.IO) { state.toJson().toString() }
-            store.commitJson(json)
+        val snapshot = state
+        bgScope.launch {
+            runCatching { store.commitJson(snapshot.toJson().toString()) }
+            runCatching { Reminders.reschedule(getApplication(), snapshot) }
         }
     }
 

@@ -1065,6 +1065,56 @@ private fun monthLabel(ts: Long): String {
     return "${c.get(Calendar.YEAR)}/${c.get(Calendar.MONTH) + 1}"
 }
 
+/* ---------------- 通用统计（非客户库） ---------------- */
+
+data class LibStats(
+    val records: Int,
+    val favorites: Int,
+    val fields: Int,
+    val thisMonthNew: Int,
+    val lastUpdated: Long,
+    /** 近 12 个月新增条数 */
+    val monthlyNew: List<Pair<String, Double>>,
+    /** 单选 / 多选字段的取值分布 */
+    val dists: List<Pair<String, List<Pair<String, Int>>>>
+)
+
+fun libStats(lib: MLibrary): LibStats {
+    val thisMonth = monthLabel(System.currentTimeMillis())
+    val months = LinkedHashMap<String, Double>()
+    for (i in 11 downTo 0) {
+        val c = Calendar.getInstance().apply { add(Calendar.MONTH, -i) }
+        months["${c.get(Calendar.YEAR)}/${c.get(Calendar.MONTH) + 1}"] = 0.0
+    }
+    var thisMonthNew = 0
+    lib.entries.forEach { e ->
+        val d = entryDate(lib, e)
+        if (d <= 0) return@forEach
+        val k = monthLabel(d)
+        if (months.containsKey(k)) months[k] = (months[k] ?: 0.0) + 1.0
+        if (k == thisMonth) thisMonthNew++
+    }
+    val dists = lib.fields
+        .filter { it.type == FieldType.SELECT || it.type == FieldType.MULTISELECT }
+        .map { f ->
+            val counts = lib.entries
+                .mapNotNull { (it.values[f.id] ?: "").trim().takeIf { v -> v.isNotEmpty() } }
+                .groupingBy { it }.eachCount().toList()
+                .sortedByDescending { it.second }.take(8)
+            f.name to counts
+        }
+        .filter { it.second.isNotEmpty() }
+    return LibStats(
+        records = lib.entries.size,
+        favorites = lib.entries.count { it.favorite },
+        fields = lib.fields.size,
+        thisMonthNew = thisMonthNew,
+        lastUpdated = lib.entries.maxOfOrNull { it.updatedAt } ?: 0L,
+        monthlyNew = months.toList(),
+        dists = dists
+    )
+}
+
 fun customerStats(lib: MLibrary): CustomerStats {
     val pf = phoneFieldOf(lib)
     val mf = moneyFieldOf(lib)

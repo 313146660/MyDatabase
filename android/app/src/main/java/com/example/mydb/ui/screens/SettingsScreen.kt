@@ -1,6 +1,12 @@
 package com.example.mydb.ui.screens
 
+import android.app.Activity
 import android.content.Intent
+import android.media.RingtoneManager
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -26,6 +32,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.IntentCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.example.mydb.BuildConfig
 import com.example.mydb.data.*
 import com.example.mydb.ui.*
@@ -39,6 +47,19 @@ import java.util.Locale
 
 private fun stampOrNever(ts: Long): String =
     if (ts <= 0) "还没有" else SimpleDateFormat("yyyy/M/d HH:mm", Locale.CHINA).format(Date(ts))
+
+private fun bgUnrestricted(ctx: android.content.Context): Boolean {
+    val pm = ctx.getSystemService(PowerManager::class.java) ?: return true
+    return pm.isIgnoringBatteryOptimizations(ctx.packageName)
+}
+
+private fun soundLabel(ctx: android.content.Context, c: ReminderCfg): String = when {
+    c.sound == ReminderCfg.SILENT -> "静音"
+    c.sound.isBlank() -> "系统默认铃声"
+    else -> runCatching {
+        RingtoneManager.getRingtone(ctx, Uri.parse(c.sound))?.getTitle(ctx)
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: "自定义铃声"
+}
 
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
@@ -136,6 +157,10 @@ fun SettingsScreen(vm: AppViewModel) {
             }
 
             Spacer(Modifier.height(16.dp))
+            Text("提醒", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+            ReminderSettingsCard()
+
+            Spacer(Modifier.height(16.dp))
             Text("外观", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
             MCard(Modifier.fillMaxWidth()) {
                 Row(
@@ -190,6 +215,200 @@ fun SettingsScreen(vm: AppViewModel) {
                 Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 10.5.sp, color = Muted2
             )
             Spacer(Modifier.height(30.dp))
+        }
+    }
+}
+
+/* ---------------- 提醒设置 ---------------- */
+
+@Composable
+private fun ReminderSettingsCard() {
+    val ctx = LocalContext.current
+    var cfg by remember { mutableStateOf(Reminders.cfg(ctx)) }
+    var canNotify by remember { mutableStateOf(Reminders.canNotify(ctx)) }
+    var canExact by remember { mutableStateOf(Reminders.canExact(ctx)) }
+    var bgOk by remember { mutableStateOf(bgUnrestricted(ctx)) }
+    var tested by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        canNotify = Reminders.canNotify(ctx)
+        canExact = Reminders.canExact(ctx)
+        bgOk = bgUnrestricted(ctx)
+        onPauseOrDispose { }
+    }
+    val soundLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val uri = res.data?.let {
+                IntentCompat.getParcelableExtra(it, RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+            }
+            cfg = cfg.copy(sound = uri?.toString() ?: ReminderCfg.SILENT)
+            Reminders.setCfg(ctx, cfg)
+        }
+    }
+
+    MCard(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("提醒铃声", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                Text(soundLabel(ctx, cfg), fontSize = 10.5.sp, color = Muted2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = {
+                val cur = when {
+                    cfg.sound == ReminderCfg.SILENT -> null
+                    cfg.sound.isBlank() -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    else -> Uri.parse(cfg.sound)
+                }
+                soundLauncher.launch(
+                    Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, cur)
+                    }
+                )
+            }) { Text("更换", fontSize = 12.sp) }
+        }
+        DividerLine()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("震动", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                Text(if (cfg.vibrate) "提醒时同时震动" else "只响铃，不震动", fontSize = 10.5.sp, color = Muted2)
+            }
+            Switch(
+                checked = cfg.vibrate,
+                onCheckedChange = { cfg = cfg.copy(vibrate = it); Reminders.setCfg(ctx, cfg) }
+            )
+        }
+        DividerLine()
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text("声音 / 震动时长", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+            Text("到点后持续响铃和震动，超时自动停止", fontSize = 10.5.sp, color = Muted2)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                listOf(5, 15, 30, 60).forEach { sec ->
+                    val on = cfg.seconds == sec
+                    Text(
+                        "${sec} 秒", fontSize = 11.sp,
+                        color = if (on) Color.White else Primary,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.clip(RoundedCornerShape(50))
+                            .background(if (on) Primary else PrimarySoft)
+                            .clickable {
+                                cfg = cfg.copy(seconds = sec)
+                                Reminders.setCfg(ctx, cfg)
+                            }
+                            .padding(horizontal = 13.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+        DividerLine()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("通知权限", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                Text(
+                    if (canNotify) "已允许，提醒会弹出通知" else "未允许，提醒不会弹出",
+                    fontSize = 10.5.sp, color = if (canNotify) Muted2 else Danger
+                )
+            }
+            if (!canNotify) {
+                TextButton(onClick = {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }) { Text("去开启", fontSize = 12.sp) }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 31) {
+            DividerLine()
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("精确闹钟", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                    Text(
+                        if (canExact) "已允许，提醒按设定时间触发" else "未允许，提醒可能延迟几分钟",
+                        fontSize = 10.5.sp, color = if (canExact) Muted2 else Danger
+                    )
+                }
+                if (!canExact) {
+                    TextButton(onClick = {
+                        runCatching {
+                            ctx.startActivity(
+                                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                    .setData(Uri.parse("package:${ctx.packageName}"))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    }) { Text("去允许", fontSize = 12.sp) }
+                }
+            }
+        }
+        DividerLine()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("后台提醒", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                Text(
+                    if (bgOk) "已允许后台运行，锁屏也能提醒" else "未允许，锁屏或切到后台后可能不提醒",
+                    fontSize = 10.5.sp, color = if (bgOk) Muted2 else Danger
+                )
+                if (!bgOk) {
+                    Text("小米 / 华为等系统还需在「自启动」里允许", fontSize = 9.5.sp, color = Muted2)
+                }
+            }
+            if (!bgOk) {
+                TextButton(onClick = {
+                    val ok = runCatching {
+                        ctx.startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .setData(Uri.parse("package:${ctx.packageName}"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }.isSuccess
+                    if (!ok) {
+                        runCatching {
+                            ctx.startActivity(
+                                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    }
+                }) { Text("去允许", fontSize = 12.sp) }
+            }
+        }
+        DividerLine()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("测试提醒", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                Text(
+                    if (tested) "已安排，5 秒后应弹出通知" else "5 秒后发一条通知，用来确认权限、铃声和震动",
+                    fontSize = 10.5.sp, color = if (tested) Primary else Muted2
+                )
+            }
+            TextButton(onClick = {
+                Reminders.test(ctx)
+                tested = true
+            }) { Text("开始测试", fontSize = 12.sp) }
         }
     }
 }

@@ -26,7 +26,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mydb.data.CustomerStats
+import com.example.mydb.data.LibStats
 import com.example.mydb.data.customerStats
+import com.example.mydb.data.fmtDay
+import com.example.mydb.data.libStats
+import com.example.mydb.data.phoneFieldOf
 import com.example.mydb.ui.AppViewModel
 import com.example.mydb.ui.SectionHead
 import com.example.mydb.ui.TopBar
@@ -46,27 +50,80 @@ private fun moneyStr(v: Double): String =
 fun StatsScreen(vm: AppViewModel, libId: String) {
     val lib = vm.state.libraries.firstOrNull { it.id == libId }
     val dataKey = lib?.let { it.entries.size * 31L + (it.entries.maxOfOrNull { e -> e.updatedAt } ?: 0L) } ?: 0L
-    val stats = remember(libId, dataKey) { lib?.let { customerStats(it) } }
+    val isCustomer = lib?.let { phoneFieldOf(it) != null } == true
+    val stats = remember(libId, dataKey, isCustomer) { lib?.takeIf { isCustomer }?.let { customerStats(it) } }
+    val generic = remember(libId, dataKey, isCustomer) { lib?.takeIf { !isCustomer }?.let { libStats(it) } }
     val color = if (lib != null) hexColor(lib.color) else Primary
 
     Column(Modifier.fillMaxSize().background(Bg)) {
-        TopBar("客户统计", subtitle = lib?.name, onBack = { vm.back() })
-        if (lib == null || stats == null) {
+        TopBar(if (isCustomer) "客户统计" else "数据统计", subtitle = lib?.name, onBack = { vm.back() })
+        if (lib == null || (isCustomer && stats == null) || (!isCustomer && generic == null)) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("暂无数据", color = Muted2, fontSize = 13.sp)
             }
             return@Column
         }
+        if (!isCustomer) {
+            val g = generic!!
+            LazyColumn(Modifier.fillMaxSize()) {
+                item { GenericOverview(g) }
+                item { SectionHead("近 12 个月新增") }
+                item { RevenueChart(g.monthlyNew, color) }
+                if (g.dists.isEmpty()) {
+                    item { SectionHead("字段分布") }
+                    item {
+                        Text(
+                            "给库添加「单选」或「多选」字段后，这里会显示各选项的占比。",
+                            fontSize = 11.5.sp, color = Muted2,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp)
+                        )
+                    }
+                } else {
+                    g.dists.forEach { (name, items) ->
+                        item { SectionHead(name) }
+                        item { BarList(items, color) }
+                    }
+                }
+                item { Spacer(Modifier.height(24.dp)) }
+            }
+            return@Column
+        }
+        val s = stats!!
         LazyColumn(Modifier.fillMaxSize()) {
-            item { OverviewGrid(stats!!) }
+            item { OverviewGrid(s) }
             item { SectionHead("近 12 个月营收") }
-            item { RevenueChart(stats.monthlyRevenue, color) }
+            item { RevenueChart(s.monthlyRevenue, color) }
             item { SectionHead("热销镜片 Top 10") }
-            item { BarList(stats.topLens, color) }
+            item { BarList(s.topLens, color) }
             item { SectionHead("用途分布") }
-            item { BarList(stats.useDist, color) }
+            item { BarList(s.useDist, color) }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+private fun GenericOverview(g: LibStats) {
+    val cards = listOf(
+        "总记录" to g.records.toString(),
+        "本月新增" to g.thisMonthNew.toString(),
+        "收藏" to g.favorites.toString(),
+        "字段" to g.fields.toString()
+    )
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        cards.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (label, value) ->
+                    StatCard(label, value, if (label == "总记录" || label == "本月新增") Primary else Muted2, Modifier.weight(1f))
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Text(
+            if (g.lastUpdated > 0) "最近更新：${fmtDay(g.lastUpdated)}" else "还没有记录",
+            fontSize = 10.5.sp, color = Muted2, modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
     }
 }
 
