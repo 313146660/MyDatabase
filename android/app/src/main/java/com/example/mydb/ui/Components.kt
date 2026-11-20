@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -198,7 +199,13 @@ fun TagChip(text: String, active: Boolean = false, icon: String? = null, onClick
 }
 
 @Composable
-fun SearchBox(value: String, placeholder: String, onChange: (String) -> Unit, onSubmit: (() -> Unit)? = null) {
+fun SearchBox(
+    value: String,
+    placeholder: String,
+    onChange: (String) -> Unit,
+    onSubmit: (() -> Unit)? = null,
+    onFocusChange: ((Boolean) -> Unit)? = null
+) {
     Row(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
@@ -212,7 +219,8 @@ fun SearchBox(value: String, placeholder: String, onChange: (String) -> Unit, on
         BasicTextField(
             value = value,
             onValueChange = onChange,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f)
+                .onFocusChanged { onFocusChange?.invoke(it.isFocused) },
             singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.5.sp, color = TextMain),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Search),

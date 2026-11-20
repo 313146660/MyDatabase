@@ -8,29 +8,39 @@ object FieldType {
     const val TEXT = "text"
     const val LONGTEXT = "longtext"
     const val NUMBER = "number"
+    const val PERCENT = "percent"
     const val TEL = "tel"
-    const val EMAIL = "email"
-    const val URL = "url"
     const val DATE = "date"
+    const val REMINDER = "reminder"
     const val SELECT = "select"
     const val MULTISELECT = "multiselect"
-    const val PICK = "pick"
     const val CHECKBOX = "checkbox"
-    const val RATING = "rating"
+    const val PICK = "pick"
     const val AUTONUMBER = "autonumber"
     const val CREATEDAT = "createdat"
     const val UPDATEDAT = "updatedat"
     const val FORMULA = "formula"
 
-    val all = listOf(
-        TEXT to "文本", LONGTEXT to "长文本", NUMBER to "数字", TEL to "电话",
-        EMAIL to "邮箱", URL to "网址", DATE to "日期", SELECT to "单选",
-        MULTISELECT to "多选", PICK to "关联选择（从其它库选）", CHECKBOX to "是 / 否",
-        RATING to "评分", AUTONUMBER to "自动编号", CREATEDAT to "创建时间",
-        UPDATEDAT to "更新时间", FORMULA to "公式"
+    /** 分组展示：字段表单用网格选择，类型再多也不用一长排翻找 */
+    val groups: List<Pair<String, List<Pair<String, String>>>> = listOf(
+        "基础" to listOf(
+            TEXT to "文本", LONGTEXT to "长文本", NUMBER to "数字", PERCENT to "进度",
+            TEL to "电话", DATE to "日期", REMINDER to "提醒"
+        ),
+        "选项" to listOf(
+            SELECT to "单选", MULTISELECT to "多选", CHECKBOX to "是 / 否"
+        ),
+        "高级" to listOf(
+            PICK to "关联选择", AUTONUMBER to "自动编号", CREATEDAT to "创建时间",
+            UPDATEDAT to "更新时间", FORMULA to "公式"
+        )
     )
 
+    val all: List<Pair<String, String>> = groups.flatMap { it.second }
+
     fun label(value: String): String = all.firstOrNull { it.first == value }?.second ?: "文本"
+
+    fun isValid(value: String): Boolean = all.any { it.first == value }
 }
 
 /* ---------------- 调色板 / 图标 ---------------- */
@@ -216,7 +226,8 @@ fun parseField(o: JSONObject): MField {
     val f = MField(
         id = o.text("id"),
         name = o.text("name"),
-        type = o.optString("type", FieldType.TEXT).ifBlank { FieldType.TEXT },
+        type = o.optString("type", FieldType.TEXT).ifBlank { FieldType.TEXT }
+            .let { if (FieldType.isValid(it)) it else FieldType.TEXT },
         unit = o.text("unit").ifBlank { null },
         required = o.bool("required"),
         options = o.optJSONArray("options")?.strList() ?: mutableListOf(),

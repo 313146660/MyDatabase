@@ -127,6 +127,8 @@ fun DetailScreen(vm: AppViewModel, libId: String, entryId: String) {
                         val raw = if (f.type == FieldType.FORMULA) evalFormula(vm.state, lib, entry, f.expr ?: "") else entry.values[f.id]
                         val shown = when (f.type) {
                             FieldType.AUTONUMBER -> (f.prefix ?: "") + (raw ?: "")
+                            FieldType.CHECKBOX -> if (raw == "1") "是" else "否"
+                            FieldType.PERCENT -> if (raw.isNullOrBlank()) "" else raw + (f.unit ?: "%")
                             else -> (raw ?: "") + (f.unit ?: "")
                         }
                         Row(

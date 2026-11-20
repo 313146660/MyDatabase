@@ -15,6 +15,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,10 +51,32 @@ fun LibraryScreen(vm: AppViewModel, libId: String) {
         return
     }
     var menu by remember { mutableStateOf(false) }
+    var sortMenu by remember { mutableStateOf(false) }
+    var aggMenu by remember { mutableStateOf(false) }
     var query by rememberSaveable(libId) { mutableStateOf("") }
     var filter by rememberSaveable(libId) { mutableStateOf("all") }
     var limit by rememberSaveable(libId) { mutableStateOf(80) }
     val matrixMode = lib.matrix != null && (lib.view ?: "list") == "matrix"
+    // 客户视图偏好与排序：统一收进右上角菜单
+    val phoneField = phoneFieldOf(lib)
+    val cv = vm.custViewOf(lib.id)
+    val custMode = cv.mode && phoneField != null
+    // 记录 / 客户共用一套排序字段，仅方向不同
+    val sortFields = listOf(
+        "last" to "最近配镜", "total" to "累计消费", "avg" to "客单价", "count" to "配镜次数"
+    )
+    val rawSortKey = if (custMode) cv.sort else (lib.sort ?: "last_desc")
+    val sortField = sortFields.firstOrNull { rawSortKey.startsWith(it.first + "_") }?.first ?: "last"
+    val sortLabel = sortFields.firstOrNull { it.first == sortField }?.second ?: "最近配镜"
+    val sortDesc = !rawSortKey.endsWith("_asc")
+    val overdueCount = if (custMode) overduePhoneCount(lib) else 0
+    fun applySort(key: String) {
+        if (custMode) {
+            vm.updateCustView(lib.id) { it.copy(sort = key) }
+        } else {
+            vm.setSort(lib.id, key)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
         Column(Modifier.fillMaxSize()) {
@@ -66,6 +90,29 @@ fun LibraryScreen(vm: AppViewModel, libId: String) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "设置", tint = TextMain)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        if (phoneField != null) {
+                            MenuCheck("记录", !custMode) {
+                                menu = false
+                                vm.updateCustView(lib.id) { it.copy(mode = false) }
+                            }
+                            MenuCheck("客户", custMode) {
+                                menu = false
+                                vm.updateCustView(lib.id) { it.copy(mode = true) }
+                            }
+                            if (custMode) {
+                                val byLabel = if (cv.by == "phone") "按电话" else "按姓名"
+                                val pinLabel = if (cv.pinned) {
+                                    " · 置顶" + if (overdueCount > 0) "（$overdueCount）" else ""
+                                } else ""
+                                MenuSub("客户聚合：$byLabel$pinLabel") {
+                                    menu = false; aggMenu = true
+                                }
+                            }
+                            MenuSub("排序：$sortLabel ${if (sortDesc) "↓" else "↑"}") {
+                                menu = false; sortMenu = true
+                            }
+                            HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 4.dp))
+                        }
                         DropdownMenuItem(text = { Text("编辑数据库") }, onClick = {
                             menu = false; vm.go(Scr.LibForm(lib.id))
                         })
@@ -86,6 +133,44 @@ fun LibraryScreen(vm: AppViewModel, libId: String) {
                         DropdownMenuItem(text = { Text("CSV 导入 / 导出") }, onClick = {
                             menu = false; vm.go(Scr.Csv(lib.id))
                         })
+                    }
+                    // 二级菜单：与主菜单同一锚点，避免嵌套弹层
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        MenuSection("排序字段")
+                        sortFields.forEach { (key, label) ->
+                            MenuCheck(label, sortField == key) {
+                                sortMenu = false
+                                applySort("${key}_${if (sortDesc) "desc" else "asc"}")
+                            }
+                        }
+                        HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 4.dp))
+                        MenuCheck("降序（从高到低 / 从新到旧）", sortDesc) {
+                            sortMenu = false
+                            applySort("${sortField}_desc")
+                        }
+                        MenuCheck("升序（从低到高 / 从旧到新）", !sortDesc) {
+                            sortMenu = false
+                            applySort("${sortField}_asc")
+                        }
+                    }
+                    DropdownMenu(expanded = aggMenu, onDismissRequest = { aggMenu = false }) {
+                        MenuSection("聚合方式")
+                        MenuCheck("按电话", cv.by == "phone") {
+                            aggMenu = false
+                            vm.updateCustView(lib.id) { it.copy(by = "phone") }
+                        }
+                        MenuCheck("按姓名", cv.by == "name") {
+                            aggMenu = false
+                            vm.updateCustView(lib.id) { it.copy(by = "name") }
+                        }
+                        HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 4.dp))
+                        MenuCheck(
+                            if (overdueCount > 0) "超期客户置顶（$overdueCount）" else "超期客户置顶",
+                            cv.pinned
+                        ) {
+                            aggMenu = false
+                            vm.updateCustView(lib.id) { it.copy(pinned = !cv.pinned) }
+                        }
                     }
                 }
             }
@@ -131,6 +216,43 @@ private fun SegButton(text: String, active: Boolean, modifier: Modifier = Modifi
     }
 }
 
+/* ---------------- 菜单 ---------------- */
+
+@Composable
+private fun MenuSection(text: String) {
+    Text(
+        text, fontSize = 10.sp, color = Muted2, fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun MenuSub(text: String, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(text, fontSize = 13.sp, color = TextMain) },
+        onClick = onClick,
+        trailingIcon = {
+            Icon(
+                Icons.Filled.KeyboardArrowRight, contentDescription = null,
+                tint = Muted2, modifier = Modifier.size(16.dp)
+            )
+        }
+    )
+}
+
+@Composable
+private fun MenuCheck(text: String, checked: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(text, fontSize = 13.sp, color = if (checked) Primary else TextMain) },
+        onClick = onClick,
+        trailingIcon = {
+            if (checked) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = Primary, modifier = Modifier.size(16.dp))
+            }
+        }
+    )
+}
+
 /* ---------------- 列表 ---------------- */
 
 @Composable
@@ -158,44 +280,26 @@ private fun ListContent(
     val familyCount = familyCountOf(lib)
     val favCount = lib.entries.count { it.favorite }
 
-    val sort = lib.sort ?: "visit_desc"
-    val sortOptions = listOf(
-        "visit_desc" to "最近验光",
-        "updated_desc" to "最近修改",
-        "visit_asc" to "最早验光",
-        "name_asc" to "名称 A→Z",
-        "name_desc" to "名称 Z→A"
-    )
+    val sort = lib.sort ?: "last_desc"
     // 搜索防抖：输入框即时响应，列表筛选等打字停顿 160ms 后再执行，避免每次按键全量扫描
     var filtQuery by remember { mutableStateOf(query) }
+    var searchFocused by remember { mutableStateOf(false) }
     LaunchedEffect(query) {
         if (query != filtQuery) delay(160)
         filtQuery = query
     }
 
-    val all = listView(lib, sort, filtQuery, filter)
-    val history = vm.searchHistory[lib.id].orEmpty()
-    var sortMenu by remember { mutableStateOf(false) }
     // 客户视图偏好存在 ViewModel 里，离开客户库再进来不会被重置
     val cv = vm.custViewOf(lib.id)
     val custMode = cv.mode
     val custBy = cv.by
     val overduePinned = cv.pinned
-    val custSortOptions = listOf(
-        "last_desc" to "最近配镜",
-        "avg_desc" to "客单价",
-        "total_desc" to "累计消费",
-        "count_desc" to "配镜次数",
-        "name_asc" to "姓名 A→Z",
-        "name_desc" to "姓名 Z→A"
-    )
-    val activeSortOptions = if (custMode) custSortOptions else sortOptions
-    val activeSortKey = if (custMode) cv.sort else sort
-    val sortLabel = activeSortOptions.firstOrNull { it.first == activeSortKey }?.second
-        ?: activeSortOptions.first().second
+    // 记录列表与客户聚合同用一套排序键；按客户聚合排序时沿用同一聚合方式
+    val aggBy = if (custBy == "name" && nameField != null) "name" else "phone"
+    val all = listView(lib, sort, filtQuery, filter, aggBy)
+    val history = vm.searchHistory[lib.id].orEmpty()
     // 只有客户模式才需要聚合与超期统计，记录模式下完全跳过
     val custActive = custMode && phoneField != null
-    val overdueCount = if (custActive) overduePhoneCount(lib) else 0
     val customerGroupsFiltered = if (!custActive) emptyList() else {
         val raw = customerGroups(lib, custBy, filtQuery, overduePinned, cv.sort)
         when (filter) {
@@ -234,22 +338,6 @@ private fun ListContent(
                         Spacer(Modifier.width(3.dp))
                         Text("统计", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.92f), fontWeight = FontWeight.SemiBold)
                     }
-                    if (custActive && overdueCount > 0) {
-                        Spacer(Modifier.width(6.dp))
-                        Row(
-                            Modifier.clip(RoundedCornerShape(9.dp))
-                                .background(if (overduePinned) Color.White else Color.White.copy(alpha = 0.16f))
-                                .clickable { vm.updateCustView(lib.id) { it.copy(pinned = !it.pinned) } }
-                                .padding(horizontal = 7.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                "超期 $overdueCount${if (overduePinned) " · 置顶" else ""}",
-                                fontSize = 9.5.sp,
-                                color = if (overduePinned) Danger else Color.White,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 // 数据条：记录 / 字段 / 收藏，三等分居中
@@ -267,65 +355,13 @@ private fun ListContent(
             }
         }
         item {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 左：排序
-                Box {
-                    Row(
-                        Modifier.clip(RoundedCornerShape(10.dp))
-                            .background(Surface)
-                            .border(1.dp, Line, RoundedCornerShape(10.dp))
-                            .clickable { sortMenu = true }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        AppIcon("sliders", 12.dp, Muted2)
-                        Spacer(Modifier.width(3.dp))
-                        Text(sortLabel, fontSize = 10.5.sp, color = TextMain, fontWeight = FontWeight.SemiBold)
-                    }
-                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                        activeSortOptions.forEach { (key, label) ->
-                            DropdownMenuItem(text = { Text(label) }, onClick = {
-                                sortMenu = false
-                                if (custMode) vm.updateCustView(lib.id) { it.copy(sort = key) }
-                                else vm.setSort(lib.id, key)
-                            })
-                        }
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                if (phoneField != null) {
-                    // 中：记录 / 客户
-                    Row(
-                        Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        SegButton("记录", !custMode, Modifier.width(46.dp)) { vm.updateCustView(lib.id) { it.copy(mode = false) } }
-                        SegButton("客户", custMode, Modifier.width(46.dp)) { vm.updateCustView(lib.id) { it.copy(mode = true) } }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    // 右：电话 / 姓名
-                    if (custMode) {
-                        Row(
-                            Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            SegButton("电话", custBy == "phone", Modifier.width(48.dp)) { vm.updateCustView(lib.id) { it.copy(by = "phone") } }
-                            SegButton("姓名", custBy == "name", Modifier.width(48.dp)) { vm.updateCustView(lib.id) { it.copy(by = "name") } }
-                        }
-                    }
-                }
-            }
-        }
-        item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                 SearchBox(
                     query, "在「${lib.name}」中搜索", onQuery,
-                    onSubmit = { vm.addSearchQuery(lib.id, query) }
+                    onSubmit = { vm.addSearchQuery(lib.id, query) },
+                    onFocusChange = { searchFocused = it }
                 )
-                if (query.isBlank() && history.isNotEmpty()) {
+                if (searchFocused && query.isBlank() && history.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("搜索历史", fontSize = 10.5.sp, color = Muted2, fontWeight = FontWeight.SemiBold)
@@ -451,23 +487,24 @@ private fun EntryRow(vm: AppViewModel, lib: MLibrary, entry: MEntry, family: Boo
                     Text("★", fontSize = 10.sp, color = Color(0xFFE0A100))
                 }
             }
-            if (lf.size > 1) {
+            // 空值字段直接不显示，不占位、不画横线
+            val cells = if (lf.size > 1) {
+                lf.drop(1).map { it to cellTextOf(vm.state, lib, entry, it) }.filter { it.second.isNotBlank() }
+            } else emptyList()
+            if (cells.isNotEmpty()) {
                 Spacer(Modifier.height(3.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
-                    lf.drop(1).forEach { f ->
-                        val v = cellTextOf(vm.state, lib, entry, f)
+                    cells.forEach { (f, v) ->
                         Text(
                             buildAnnotatedString {
                                 if (lib.listShowNames) {
                                     withStyle(SpanStyle(color = Muted2)) { append(f.name) }
                                     append(" ")
                                 }
-                                withStyle(SpanStyle(color = if (v.isBlank()) Muted else TextMain)) {
-                                    append(v.ifBlank { "—" })
-                                }
+                                withStyle(SpanStyle(color = TextMain)) { append(v) }
                             },
                             fontSize = metaSize,
                             lineHeight = metaSize * 1.3f,

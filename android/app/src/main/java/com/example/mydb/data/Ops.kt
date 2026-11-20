@@ -46,9 +46,11 @@ fun listFieldsOf(lib: MLibrary): List<MField> {
 fun cellTextOf(state: MState, lib: MLibrary, entry: MEntry, f: MField?): String {
     if (f == null) return ""
     val raw = if (f.type == FieldType.FORMULA) evalFormula(state, lib, entry, f.expr ?: "") else entry.values[f.id]
+    if (f.type == FieldType.CHECKBOX) return if (raw == "1") "是" else "否"
     var s = oneLine(raw)
     if (s.isEmpty()) return ""
     if (f.type == FieldType.AUTONUMBER) s = (f.prefix ?: "") + s
+    if (f.type == FieldType.PERCENT) return s + (f.unit ?: "%")
     return s + (f.unit ?: "")
 }
 
@@ -893,20 +895,28 @@ fun customerGroupsCalc(lib: MLibrary, by: String, query: String = "", overdueFir
                 last, months, last != null && months > reviewMonths(lastUse))
         )
     }
-    val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
     val base = when (sortKey) {
         "total_desc" -> out.sortedWith(
             compareByDescending<CustomerGroup> { it.total }.thenByDescending { it.lastDate ?: 0L }
         )
+        "total_asc" -> out.sortedWith(
+            compareBy<CustomerGroup> { it.total }.thenByDescending { it.lastDate ?: 0L }
+        )
         "count_desc" -> out.sortedWith(
             compareByDescending<CustomerGroup> { it.count }.thenByDescending { it.lastDate ?: 0L }
+        )
+        "count_asc" -> out.sortedWith(
+            compareBy<CustomerGroup> { it.count }.thenByDescending { it.lastDate ?: 0L }
         )
         "avg_desc" -> out.sortedWith(
             compareByDescending<CustomerGroup> { it.total / it.count.coerceAtLeast(1) }
                 .thenByDescending { it.lastDate ?: 0L }
         )
-        "name_asc" -> out.sortedWith { a, b -> collator.compare(a.display, b.display) }
-        "name_desc" -> out.sortedWith { a, b -> collator.compare(b.display, a.display) }
+        "avg_asc" -> out.sortedWith(
+            compareBy<CustomerGroup> { it.total / it.count.coerceAtLeast(1) }
+                .thenByDescending { it.lastDate ?: 0L }
+        )
+        "last_asc" -> out.sortedWith(compareBy<CustomerGroup> { it.lastDate ?: Long.MAX_VALUE })
         else -> out.sortedWith(compareByDescending<CustomerGroup> { it.lastDate ?: 0L })
     }
     // 稳定排序：超期置顶时保留上面选定的排序作为组内次序
@@ -976,10 +986,11 @@ fun familyCountOf(lib: MLibrary): Int =
         }
     }
 
-/** 记录模式列表：筛选 + 排序，结果按库指纹缓存 */
-fun listView(lib: MLibrary, sort: String, query: String, filter: String): List<MEntry> =
-    DeriveCache.get<List<MEntry>>("lv|${lib.id}|${libDataKey(lib)}|$sort|$query|$filter") {
-        val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
+/** 记录模式列表：筛选 + 排序，结果按库指纹缓存。
+ *  sort 与客户视图共用一套键：last / total / avg / count + _asc / _desc，
+ *  total / avg / count 取该记录所属客户的聚合值，未聚合到客户的记录排最后。 */
+fun listView(lib: MLibrary, sort: String, query: String, filter: String, by: String = "phone"): List<MEntry> =
+    DeriveCache.get<List<MEntry>>("lv|${lib.id}|${libDataKey(lib)}|$sort|$query|$filter|$by") {
         val pf = phoneFieldOf(lib)
         val names = phoneNamesOf(lib)
         val filtered = lib.entries.filter { entryMatches(lib, it, query) }
@@ -990,13 +1001,42 @@ fun listView(lib: MLibrary, sort: String, query: String, filter: String): List<M
                     else -> list
                 }
             }
-        when (sort) {
-            "updated_desc" -> filtered.sortedByDescending { it.updatedAt }
-            "visit_asc" -> filtered.sortedWith(compareBy<MEntry> { visitDate(lib, it) ?: Long.MAX_VALUE }.thenByDescending { it.updatedAt })
-            "name_asc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, a), titleOf(lib, b)) }
-            "name_desc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, b), titleOf(lib, a)) }
-            else -> filtered.sortedWith(compareByDescending<MEntry> { visitDate(lib, it) ?: 0L }.thenByDescending { it.updatedAt })
+        val asc = sort.endsWith("_asc")
+        val field = sort.substringBeforeLast('_')
+        if (field == "total" || field == "avg" || field == "count") {
+            val stats = custStatIndex(lib, by)
+            fun valueOf(e: MEntry): Double {
+                val g = stats[custGroupKeyOf(lib, e, by)] ?: return if (asc) Double.MAX_VALUE else -1.0
+                return when (field) {
+                    "total" -> g.total
+                    "avg" -> g.total / g.count.coerceAtLeast(1)
+                    else -> g.count.toDouble()
+                }
+            }
+            return@get if (asc) {
+                filtered.sortedWith(compareBy<MEntry> { valueOf(it) }.thenByDescending { it.updatedAt })
+            } else {
+                filtered.sortedWith(compareByDescending<MEntry> { valueOf(it) }.thenByDescending { it.updatedAt })
+            }
         }
+        if (asc) {
+            filtered.sortedWith(compareBy<MEntry> { visitDate(lib, it) ?: Long.MAX_VALUE }.thenByDescending { it.updatedAt })
+        } else {
+            filtered.sortedWith(compareByDescending<MEntry> { visitDate(lib, it) ?: 0L }.thenByDescending { it.updatedAt })
+        }
+    }
+
+/** 记录所属客户的聚合键（电话规范化 / 姓名），无聚合字段时返回空串 */
+fun custGroupKeyOf(lib: MLibrary, entry: MEntry, by: String): String = when (by) {
+    "phone" -> phoneFieldOf(lib)?.let { normPhone(entry.values[it.id]) }.orEmpty()
+    "name" -> nameOf(lib, entry)
+    else -> ""
+}
+
+/** 客户级指标索引：累计消费 / 客单价 / 次数，按库指纹缓存 */
+fun custStatIndex(lib: MLibrary, by: String): Map<String, CustomerGroup> =
+    DeriveCache.get("csi|${lib.id}|${libDataKey(lib)}|$by") {
+        customerGroupsCalc(lib, by, "", false, "last_desc").associateBy { it.key }
     }
 
 /** 客户聚合（带缓存） */

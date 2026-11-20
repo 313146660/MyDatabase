@@ -85,6 +85,20 @@ fun parseDate(v: String?): Long? {
 
 fun fmtDay(ts: Long): String = SimpleDateFormat("yyyy/M/d", Locale.CHINA).format(Date(ts))
 
+/** 解析「日期 + 时间」；只有日期时默认当天 09:00 */
+fun parseStamp(v: String?): Long? {
+    val s = (v ?: "").trim()
+    if (s.isEmpty()) return null
+    for (f in listOf("yyyy/M/d HH:mm", "yyyy-MM-dd HH:mm", "yyyy/M/d H:mm")) {
+        try {
+            val d = SimpleDateFormat(f, Locale.CHINA).parse(s) ?: continue
+            return d.time
+        } catch (_: Exception) {
+        }
+    }
+    return parseDate(s)?.let { it + 9 * 3600_000L }
+}
+
 fun fmtStamp(ts: Long): String = SimpleDateFormat("yyyy/M/d HH:mm", Locale.CHINA).format(Date(ts))
 
 fun fmtClock(ts: Long): String = SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(ts))

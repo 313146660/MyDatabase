@@ -1,5 +1,8 @@
 package com.example.mydb.ui.screens
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +31,8 @@ import androidx.compose.ui.unit.sp
 import com.example.mydb.data.*
 import com.example.mydb.ui.*
 import com.example.mydb.ui.theme.*
+import java.util.Calendar
+import kotlin.math.roundToInt
 
 @Composable
 fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
@@ -128,8 +134,69 @@ fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
                                 values[f.id] ?: "", { values[f.id] = it }, placeholder = "0",
                                 keyboardType = KeyboardType.Decimal
                             )
+                            FieldType.PERCENT -> Column {
+                                val pct = (values[f.id]?.toFloatOrNull() ?: 0f).coerceIn(0f, 100f)
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Slider(
+                                        value = pct,
+                                        onValueChange = { values[f.id] = it.roundToInt().toString() },
+                                        valueRange = 0f..100f,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        "${pct.roundToInt()}%",
+                                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Primary,
+                                        modifier = Modifier.width(44.dp),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.End
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(0, 25, 50, 75, 100).forEach { p ->
+                                        Text(
+                                            "$p%", fontSize = 10.5.sp, color = Primary,
+                                            modifier = Modifier.clip(RoundedCornerShape(50)).background(PrimarySoft)
+                                                .clickable { values[f.id] = p.toString() }
+                                                .padding(horizontal = 9.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            FieldType.CHECKBOX -> Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    if (values[f.id] == "1") "是" else "否",
+                                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    color = if (values[f.id] == "1") Primary else Muted2,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Switch(
+                                    checked = values[f.id] == "1",
+                                    onCheckedChange = { values[f.id] = if (it) "1" else "" }
+                                )
+                            }
                             FieldType.DATE -> Column {
-                                AppTextField(values[f.id] ?: "", { values[f.id] = it }, placeholder = "2026/11/19")
+                                val ctx = LocalContext.current
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.weight(1f)) {
+                                        AppTextField(values[f.id] ?: "", { values[f.id] = it }, placeholder = "2026/11/19")
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "日历", fontSize = 12.sp, color = Primary, fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.clip(RoundedCornerShape(50)).background(PrimarySoft)
+                                            .clickable {
+                                                pickDateTime(ctx, parseDate(values[f.id]) ?: System.currentTimeMillis(), false) {
+                                                    values[f.id] = fmtDay(it)
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    )
+                                }
                                 Row(Modifier.padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("今天", "昨天").forEach { label ->
                                         val ts = System.currentTimeMillis() - if (label == "昨天") 86_400_000L else 0L
@@ -137,6 +204,58 @@ fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
                                             label, fontSize = 10.5.sp, color = Primary,
                                             modifier = Modifier.clip(RoundedCornerShape(50)).background(PrimarySoft)
                                                 .clickable { values[f.id] = fmtDay(ts) }.padding(horizontal = 9.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            FieldType.REMINDER -> Column {
+                                val ctx = LocalContext.current
+                                val cur = values[f.id].orEmpty()
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        cur.ifBlank { "未设置提醒" }, fontSize = 14.sp,
+                                        color = if (cur.isBlank()) Muted2 else TextMain,
+                                        fontWeight = if (cur.isBlank()) FontWeight.Normal else FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        "选时间", fontSize = 12.sp, color = Primary, fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.clip(RoundedCornerShape(50)).background(PrimarySoft)
+                                            .clickable {
+                                                pickDateTime(ctx, parseStamp(cur) ?: (System.currentTimeMillis() + 3_600_000L), true) {
+                                                    values[f.id] = fmtStamp(it)
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    )
+                                    if (cur.isNotBlank()) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "清除", fontSize = 12.sp, color = Muted2,
+                                            modifier = Modifier.clip(RoundedCornerShape(50)).background(Bg)
+                                                .clickable { values[f.id] = "" }
+                                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                                        )
+                                    }
+                                }
+                                Row(Modifier.padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    val now = System.currentTimeMillis()
+                                    val tomorrow9 = Calendar.getInstance().apply {
+                                        add(Calendar.DAY_OF_YEAR, 1)
+                                        set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
+                                    }.timeInMillis
+                                    listOf(
+                                        "1 小时后" to now + 3_600_000L,
+                                        "今晚 20:00" to Calendar.getInstance().apply {
+                                            set(Calendar.HOUR_OF_DAY, 20); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
+                                        }.timeInMillis,
+                                        "明天 09:00" to tomorrow9
+                                    ).forEach { (label, ts) ->
+                                        Text(
+                                            label, fontSize = 10.5.sp, color = Primary,
+                                            modifier = Modifier.clip(RoundedCornerShape(50)).background(PrimarySoft)
+                                                .clickable { values[f.id] = fmtStamp(ts) }
+                                                .padding(horizontal = 9.dp, vertical = 3.dp)
                                         )
                                     }
                                 }
@@ -197,6 +316,22 @@ fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
             )
         }
     }
+}
+
+/** 系统日历 / 时钟选择：withTime = true 时先选日期再选时间 */
+private fun pickDateTime(ctx: Context, ts: Long, withTime: Boolean, onPick: (Long) -> Unit) {
+    val cal = Calendar.getInstance().apply { timeInMillis = ts }
+    DatePickerDialog(ctx, { _, y, m, d ->
+        if (!withTime) {
+            val c = Calendar.getInstance().apply { clear(); set(y, m, d) }
+            onPick(c.timeInMillis)
+        } else {
+            TimePickerDialog(ctx, { _, h, min ->
+                val c = Calendar.getInstance().apply { clear(); set(y, m, d, h, min) }
+                onPick(c.timeInMillis)
+            }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
+        }
+    }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
 }
 
 @Composable

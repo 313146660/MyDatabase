@@ -169,6 +169,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             rev++
             booting = false
             scheduleWarm()
+            // 冷启动重排「提醒」闹钟（数据可能在别处被改过）
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { Reminders.reschedule(getApplication(), state) }
+            }
         }
     }
 
@@ -185,7 +189,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (lib.entries.isEmpty()) return@forEach
                     phoneNamesOf(lib)
                     familyCountOf(lib)
-                    listView(lib, lib.sort ?: "visit_desc", "", "all")
+                    listView(lib, lib.sort ?: "last_desc", "", "all")
                     if (phoneFieldOf(lib) != null) {
                         overduePhoneCount(lib)
                         customerGroups(lib, "phone", "", true, "last_desc")
@@ -373,8 +377,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(350)
-            val json = withContext(Dispatchers.IO) { state.toJson().toString() }
-            store.commitJson(json)
+            withContext(Dispatchers.IO) {
+                store.commitJson(state.toJson().toString())
+                runCatching { Reminders.reschedule(getApplication(), state) }
+            }
             scheduleWarm()
         }
         if (bk.auto && bk.url.isNotBlank()) {

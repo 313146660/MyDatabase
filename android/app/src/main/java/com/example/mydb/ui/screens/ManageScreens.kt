@@ -240,16 +240,100 @@ fun FieldsScreen(vm: AppViewModel, libId: String) {
     }
 }
 
-private fun fieldIcon(f: MField): String = when (f.type) {
+private fun fieldTypeIcon(type: String): String = when (type) {
     FieldType.TEXT, FieldType.LONGTEXT -> "doc"
     FieldType.NUMBER -> "database"
+    FieldType.PERCENT -> "sliders"
     FieldType.TEL -> "phone"
-    FieldType.DATE -> "calendar"
+    FieldType.DATE, FieldType.CREATEDAT, FieldType.UPDATEDAT -> "calendar"
     FieldType.PICK -> "link"
     FieldType.SELECT, FieldType.MULTISELECT -> "sliders"
+    FieldType.CHECKBOX -> "check"
     FieldType.AUTONUMBER -> "refresh"
     FieldType.FORMULA -> "star"
     else -> "doc"
+}
+
+private fun fieldIcon(f: MField): String = fieldTypeIcon(f.type)
+
+/** 类型选择：分组网格弹层，替代一长排下拉 */
+@Composable
+private fun TypePickerField(selected: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    FieldLabel("类型")
+    Spacer(Modifier.height(6.dp))
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Bg)
+            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .clickable { open = true }
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AppIcon(fieldTypeIcon(selected), 16.dp, Primary)
+        Spacer(Modifier.width(8.dp))
+        Text(FieldType.label(selected), fontSize = 14.sp, color = TextMain, modifier = Modifier.weight(1f))
+        Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = Muted2)
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            containerColor = Surface,
+            title = { Text("选择字段类型", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextMain) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    FieldType.groups.forEach { (group, list) ->
+                        Text(
+                            group, fontSize = 10.5.sp, color = Muted2, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 5.dp)
+                        )
+                        list.chunked(2).forEach { rowItems ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = 7.dp),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                rowItems.forEach { (value, label) ->
+                                    TypeCell(value, label, value == selected, Modifier.weight(1f)) {
+                                        open = false
+                                        onSelect(value)
+                                    }
+                                }
+                                if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { open = false }) { Text("取消", color = Muted2) }
+            }
+        )
+    }
+}
+
+@Composable
+private fun TypeCell(
+    value: String, label: String, selected: Boolean,
+    modifier: Modifier = Modifier, onClick: () -> Unit
+) {
+    Row(
+        modifier.clip(RoundedCornerShape(11.dp))
+            .background(if (selected) PrimarySoft else Bg)
+            .border(1.dp, if (selected) Primary else Line, RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AppIcon(fieldTypeIcon(value), 15.dp, if (selected) Primary else Muted2)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label, fontSize = 12.sp,
+            color = if (selected) Primary else TextMain,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+    }
 }
 
 @Composable
@@ -280,9 +364,11 @@ fun FieldFormScreen(vm: AppViewModel, libId: String, fieldId: String?) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             MCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    FormRow("字段名称") { AppTextField(name, { name = it }, placeholder = "例如：姓名、度数、备注") }
-                    SelectRow("类型", type, FieldType.all) { type = it }
-                    if (type in listOf(FieldType.NUMBER, FieldType.RATING)) {
+                    FormRow("字段名称") {
+                        AppTextField(name, { name = it }, placeholder = "留空则用类型名，如「${FieldType.label(type)}」")
+                    }
+                    TypePickerField(type) { type = it }
+                    if (type in listOf(FieldType.NUMBER, FieldType.PERCENT)) {
                         FormRow("单位", "例如：元、片、度") { AppTextField(unit, { unit = it }, placeholder = "可不填") }
                     }
                     if (type == FieldType.SELECT || type == FieldType.MULTISELECT) {
@@ -381,13 +467,19 @@ fun FieldFormScreen(vm: AppViewModel, libId: String, fieldId: String?) {
 
                     Spacer(Modifier.height(12.dp))
                     PillButton(if (existing == null) "添加字段" else "保存字段", onClick = {
-                        if (name.isBlank()) {
-                            vm.toast("请填写字段名称")
-                            return@PillButton
+                        // 名称留空时用类型名作为默认值；重名自动加序号
+                        val finalName = name.trim().ifBlank {
+                            val base = FieldType.label(type)
+                            var n = base
+                            var i = 2
+                            while (lib.fields.any { it.name == n && it.id != existing?.id }) {
+                                n = "$base $i"; i++
+                            }
+                            n
                         }
                         val f = MField(
                             id = existing?.id ?: uid("f_"),
-                            name = name.trim(),
+                            name = finalName,
                             type = type,
                             unit = unit.trim().ifBlank { null },
                             required = required,
