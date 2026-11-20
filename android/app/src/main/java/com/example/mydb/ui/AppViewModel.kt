@@ -156,16 +156,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         persistSettings()
     }
 
-    /** 记录一次补货文本快照（复制/分享/保存时调用）。与最近一条同库文本相同则去重。 */
-    fun addRestockHistory(libId: String, text: String, total: Int, count: Int) {
+    /** 记录一次补货文本快照（复制/分享/保存时调用）。与最近一条同库文本相同则去重。
+     *  items 为结构化明细，用于货到后一键入库。 */
+    fun addRestockHistory(libId: String, text: String, total: Int, count: Int, items: List<RestockItem> = emptyList()) {
         if (text.isBlank()) return
         val last = restockHistory.firstOrNull()
         if (last != null && last.libId == libId && last.text == text) return
+        val orderItems = items.map { RestockOrderItem(it.model, it.sph, it.cyl, it.restock) }
         val rec = RestockRecord(
             id = java.util.UUID.randomUUID().toString(),
             libId = libId, libName = lib(libId)?.name ?: "",
             at = System.currentTimeMillis(),
-            total = total, count = count, text = text
+            total = total, count = count, text = text,
+            items = orderItems, received = false
         )
         restockHistory = (listOf(rec) + restockHistory).take(50)
         persistSettings()
@@ -587,6 +590,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             r.targets[model] = cur
         }
         touch()
+    }
+
+    /** 新增/更新某型号的度数范围补货目标规则（按 id 去重）。 */
+    fun saveRestockRangeRule(libId: String, rule: RestockRangeRule) {
+        val lib = lib(libId) ?: return
+        val r = ensureRestock(lib)
+        r.ranges.removeAll { it.id == rule.id }
+        r.ranges.add(rule)
+        touch()
+    }
+
+    fun deleteRestockRangeRule(libId: String, id: String) {
+        val lib = lib(libId) ?: return
+        ensureRestock(lib).ranges.removeAll { it.id == id }
+        touch()
+    }
+
+    /** 设置某型号的供货商；name 为空则清除。 */
+    fun setSupplier(libId: String, model: String, name: String) {
+        val lib = lib(libId) ?: return
+        val r = ensureRestock(lib)
+        val n = name.trim()
+        if (n.isEmpty()) r.suppliers.remove(model) else r.suppliers[model] = n
+        touch()
+    }
+
+    /** 货到入库：把补货单明细数量加到库存，找不到匹配则新建条目。 */
+    fun receiveRestock(libId: String, recordId: String) {
+        val lib = lib(libId) ?: return
+        val rec = restockHistory.firstOrNull { it.id == recordId } ?: return
+        if (rec.received || rec.items.isEmpty()) {
+            toast("没有可入库的明细"); return
+        }
+        val mx = matrixCfg(lib) ?: return
+        var updated = 0
+        var created = 0
+        rec.items.forEach { item ->
+            val existing = findStockEntry(lib, item.model, item.sph, item.cyl)
+            if (existing != null) {
+                val raw = existing.values[mx.value.id]
+                val cur = if (raw.isNullOrBlank()) 0 else (raw.toDoubleOrNull() ?: 0.0).toInt()
+                existing.values[mx.value.id] = (cur + item.qty).toString()
+                existing.updatedAt = System.currentTimeMillis()
+                updated++
+            } else {
+                val entry = MEntry(id = java.util.UUID.randomUUID().toString())
+                entry.values[mx.group.id] = item.model
+                entry.values[mx.row.id] = fmtPower(item.sph)
+                entry.values[mx.col.id] = if (item.cyl == 0.0) "0" else fmtPower(item.cyl)
+                entry.values[mx.value.id] = item.qty.toString()
+                stampAutoFields(lib, entry, true)
+                lib.entries.add(entry)
+                created++
+            }
+        }
+        restockHistory = restockHistory.map { if (it.id == recordId) it.copy(received = true) else it }
+        touch()
+        persistSettings()
+        toast("已入库：更新 $updated 条，新建 $created 条")
     }
 
     /* ---------------- CSV ---------------- */

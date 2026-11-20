@@ -475,7 +475,16 @@ data class RestockItem(
     val isOut: Boolean get() = qty <= 0
 }
 
-/** 一条补货历史记录：某次生成并复制/分享/保存过的补货文本快照。 */
+/** 补货单里的一条明细：货到入库时按型号/球镜/柱镜匹配库存规格。 */
+data class RestockOrderItem(
+    val model: String,
+    val sph: Double,
+    val cyl: Double,
+    val qty: Int
+)
+
+/** 一条补货历史记录：某次生成并复制/分享/保存过的补货文本快照。
+ *  items 为结构化明细（用于入库），received 标记是否已确认入库。 */
 data class RestockRecord(
     val id: String,
     val libId: String,
@@ -483,15 +492,41 @@ data class RestockRecord(
     val at: Long,
     val total: Int,
     val count: Int,
-    val text: String
+    val text: String,
+    val items: List<RestockOrderItem> = emptyList(),
+    val received: Boolean = false
 )
 
 fun restockCfgOf(lib: MLibrary): RestockCfg = lib.restock ?: RestockCfg()
 
-fun restockTargetFor(cfg: RestockCfg, model: String, isPlain: Boolean): Int {
+fun restockTargetFor(cfg: RestockCfg, model: String, isPlain: Boolean, sph: Double = 0.0, cyl: Double = 0.0): Int {
+    // 命中的范围规则里取最具体的（球镜区间跨度最小）；plain/cylTarget 为 -1 表示不覆盖
+    val hit = cfg.ranges.filter { rangeMatches(it, model, sph, cyl) }.minByOrNull { rangeSpan(it) }
+    val rangeV = if (isPlain) (hit?.plain ?: -1) else (hit?.cylTarget ?: -1)
     val t = cfg.targets[model]
-    val v = if (isPlain) (t?.plain ?: cfg.defaultPlain) else (t?.cyl ?: cfg.defaultCyl)
+    val v = if (rangeV >= 0) rangeV else if (isPlain) (t?.plain ?: cfg.defaultPlain) else (t?.cyl ?: cfg.defaultCyl)
     return v.coerceAtLeast(0)
+}
+
+private fun rangeMatches(rule: RestockRangeRule, model: String, sph: Double, cyl: Double): Boolean {
+    if (rule.model.isNotEmpty() && rule.model != model) return false
+    val lo = toPower(rule.sphMin)
+    val hi = toPower(rule.sphMax)
+    if (lo != null && hi != null) {
+        val a = minOf(lo, hi); val b = maxOf(lo, hi)
+        if (sph < a - 1e-9 || sph > b + 1e-9) return false
+    } else if (lo != null && sph < lo - 1e-9) return false
+    else if (hi != null && sph > hi + 1e-9) return false
+    if (rule.cyl == "none" && cyl != 0.0) return false
+    if (rule.cyl == "has" && cyl == 0.0) return false
+    return true
+}
+
+/** 规则的球镜区间跨度，越小越具体；只设一边或都不设视为最不具体。 */
+private fun rangeSpan(rule: RestockRangeRule): Double {
+    val lo = toPower(rule.sphMin) ?: return Double.POSITIVE_INFINITY
+    val hi = toPower(rule.sphMax) ?: return Double.POSITIVE_INFINITY
+    return abs(hi - lo)
 }
 
 /** 库里出现过的所有型号（去重，按出现顺序）。 */
@@ -520,7 +555,7 @@ fun restockItems(lib: MLibrary): List<RestockItem> {
         val raw = e.values[mx.value.id]
         val qty = if (raw.isNullOrBlank()) 0 else (raw.toDoubleOrNull() ?: 0.0).toInt()
         if (onlyLow && qty > thresholdFor(al, model, sph, cyl)) return@forEach
-        val target = restockTargetFor(cfg, model, cyl == 0.0)
+        val target = restockTargetFor(cfg, model, cyl == 0.0, sph, cyl)
         val need = (target - qty).coerceAtLeast(0)
         if (need <= 0) return@forEach
         out.add(RestockItem(e, model, sph, cyl, qty, target, need))
@@ -529,21 +564,39 @@ fun restockItems(lib: MLibrary): List<RestockItem> {
     return out.sortedWith(compareBy({ it.model }, { abs(it.sph) }, { it.sph }, { abs(it.cyl) }, { it.cyl }))
 }
 
+fun restockUnit(lib: MLibrary): String =
+    lib.fields.firstOrNull { it.name.contains("库存") }?.unit?.takeIf { it.isNotBlank() } ?: "片"
+
 /** 生成发给供货商的纯文本：按型号分组，数量 = 目标库存 − 当前库存；含型号小计与合计。
  *  同型号内按度数浅→深排序，不在文本里加段标签。 */
-fun restockText(lib: MLibrary): String {
-    val unit = lib.fields.firstOrNull { it.name.contains("库存") }?.unit?.takeIf { it.isNotBlank() } ?: "片"
+fun restockText(lib: MLibrary): String = buildRestockText(restockItems(lib), restockUnit(lib))
+
+private fun buildRestockText(list: List<RestockItem>, unit: String): String {
     val sb = StringBuilder()
     var total = 0
-    restockItems(lib).groupBy { it.model }.forEach { (model, list) ->
+    list.groupBy { it.model }.forEach { (model, ml) ->
         if (sb.isNotEmpty()) sb.append("\r\n")
-        val sum = list.sumOf { it.restock }
+        val sum = ml.sumOf { it.restock }
         total += sum
         sb.append(model).append("  共 ").append(sum).append(" ").append(unit).append("\r\n")
-        list.forEach { appendRestockLine(sb, it) }
+        ml.forEach { appendRestockLine(sb, it) }
     }
     if (total > 0) sb.append("\r\n合计：").append(total).append(" ").append(unit).append("\r\n")
     return sb.toString().trimEnd()
+}
+
+/** 按供货商分组生成补货文本：未填供货商的型号归「未分类」。返回 供货商名 -> 该组文本。 */
+fun restockTextBySupplier(lib: MLibrary): Map<String, String> {
+    val cfg = restockCfgOf(lib)
+    val unit = restockUnit(lib)
+    val groups = linkedMapOf<String, MutableList<RestockItem>>()
+    restockItems(lib).forEach { item ->
+        val sup = cfg.suppliers[item.model]?.takeIf { it.isNotBlank() } ?: "未分类"
+        groups.getOrPut(sup) { mutableListOf() }.add(item)
+    }
+    val out = linkedMapOf<String, String>()
+    groups.forEach { (sup, list) -> out[sup] = buildRestockText(list, unit) }
+    return out
 }
 
 private fun appendRestockLine(sb: StringBuilder, i: RestockItem) {
@@ -557,6 +610,13 @@ fun restockHistoryFromJson(arr: org.json.JSONArray?): List<RestockRecord> {
     val out = mutableListOf<RestockRecord>()
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
+        val items = mutableListOf<RestockOrderItem>()
+        o.optJSONArray("items")?.let { ia ->
+            for (j in 0 until ia.length()) {
+                val io = ia.optJSONObject(j) ?: continue
+                items.add(RestockOrderItem(io.optString("model"), io.optDouble("sph"), io.optDouble("cyl"), io.optInt("qty")))
+            }
+        }
         out.add(
             RestockRecord(
                 id = o.optString("id"),
@@ -565,7 +625,9 @@ fun restockHistoryFromJson(arr: org.json.JSONArray?): List<RestockRecord> {
                 at = o.optLong("at"),
                 total = o.optInt("total"),
                 count = o.optInt("count"),
-                text = o.optString("text")
+                text = o.optString("text"),
+                items = items,
+                received = o.optBoolean("received", false)
             )
         )
     }
@@ -575,14 +637,31 @@ fun restockHistoryFromJson(arr: org.json.JSONArray?): List<RestockRecord> {
 fun restockHistoryToJson(list: List<RestockRecord>): org.json.JSONArray {
     val arr = org.json.JSONArray()
     list.forEach { r ->
-        arr.put(
-            org.json.JSONObject()
-                .put("id", r.id).put("libId", r.libId).put("libName", r.libName)
-                .put("at", r.at).put("total", r.total).put("count", r.count).put("text", r.text)
-        )
+        val obj = org.json.JSONObject()
+            .put("id", r.id).put("libId", r.libId).put("libName", r.libName)
+            .put("at", r.at).put("total", r.total).put("count", r.count).put("text", r.text)
+            .put("received", r.received)
+        val ia = org.json.JSONArray()
+        r.items.forEach { it2 ->
+            ia.put(org.json.JSONObject().put("model", it2.model).put("sph", it2.sph).put("cyl", it2.cyl).put("qty", it2.qty))
+        }
+        obj.put("items", ia)
+        arr.put(obj)
     }
     return arr
 }
+
+/** 查找库里型号/球镜/柱镜完全匹配的库存条目，用于入库定位。 */
+fun findStockEntry(lib: MLibrary, model: String, sph: Double, cyl: Double): MEntry? {
+    val mx = matrixCfg(lib) ?: return null
+    return lib.entries.firstOrNull { e ->
+        (e.values[mx.group.id] ?: "").trim() == model &&
+            powerEq(toPower(e.values[mx.row.id]), sph) &&
+            abs(cylValueOf(e, mx) - cyl) < 1e-6
+    }
+}
+
+private fun powerEq(a: Double?, b: Double): Boolean = a != null && abs(a - b) < 1e-6
 
 /** 所有库的低库存，用于首页 */fun lowStockAll(state: MState): List<Pair<MLibrary, List<LowItem>>> =
     state.libraries.map { it to lowStockOf(it) }.filter { it.second.isNotEmpty() }

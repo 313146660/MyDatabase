@@ -119,12 +119,26 @@ data class AlertsCfg(
 /** 某个型号的补货目标库存：单光和带散光分开。 */
 data class RestockTarget(var plain: Int = 4, var cyl: Int = 2)
 
-/** 补货清单配置：默认目标、补货范围、各型号单独目标。 */
+/** 某个型号的度数范围补货目标：命中区间的规格用这里的目标覆盖型号默认目标。
+ *  plain / cylTarget 为 -1 表示不覆盖该类（回退到型号目标 / 默认）。cyl: all / plain / has。 */
+data class RestockRangeRule(
+    val id: String,
+    var model: String = "",
+    var sphMin: String = "",
+    var sphMax: String = "",
+    var cyl: String = "all",
+    var plain: Int = -1,
+    var cylTarget: Int = -1
+)
+
+/** 补货清单配置：默认目标、补货范围、各型号单独目标、度数范围规则、供货商。 */
 data class RestockCfg(
     var defaultPlain: Int = 4,
     var defaultCyl: Int = 2,
     var scope: String = "below_target",
-    val targets: MutableMap<String, RestockTarget> = linkedMapOf()
+    val targets: MutableMap<String, RestockTarget> = linkedMapOf(),
+    val ranges: MutableList<RestockRangeRule> = mutableListOf(),
+    val suppliers: MutableMap<String, String> = linkedMapOf()
 )
 
 data class MLibrary(
@@ -312,11 +326,34 @@ fun parseLibrary(o: JSONObject): MLibrary {
                 targets[k] = RestockTarget(t.int("plain", 4), t.int("cyl", 2))
             }
         }
+        val ranges = mutableListOf<RestockRangeRule>()
+        r.optJSONArray("ranges")?.let { rs ->
+            for (i in 0 until rs.length()) {
+                val o2 = rs.optJSONObject(i) ?: continue
+                ranges.add(
+                    RestockRangeRule(
+                        id = o2.optString("id"),
+                        model = o2.optString("model"),
+                        sphMin = o2.optString("sphMin"),
+                        sphMax = o2.optString("sphMax"),
+                        cyl = o2.optString("cyl").ifBlank { "all" },
+                        plain = o2.optInt("plain", -1),
+                        cylTarget = o2.optInt("cylTarget", -1)
+                    )
+                )
+            }
+        }
+        val suppliers = linkedMapOf<String, String>()
+        r.optJSONObject("suppliers")?.let { ss ->
+            for (k in ss.keys()) suppliers[k] = ss.optString(k)
+        }
         lib.restock = RestockCfg(
             defaultPlain = r.int("defaultPlain", 4),
             defaultCyl = r.int("defaultCyl", 2),
             scope = r.text("scope").ifBlank { "below_target" },
-            targets = targets
+            targets = targets,
+            ranges = ranges,
+            suppliers = suppliers
         )
     }
     return lib
@@ -396,6 +433,19 @@ fun MState.toJson(): JSONObject {
                 ts.put(k, JSONObject().put("plain", t.plain).put("cyl", t.cyl))
             }
             ro.put("targets", ts)
+            val rs = JSONArray()
+            r.ranges.forEach { rr ->
+                rs.put(
+                    JSONObject()
+                        .put("id", rr.id).put("model", rr.model)
+                        .put("sphMin", rr.sphMin).put("sphMax", rr.sphMax)
+                        .put("cyl", rr.cyl).put("plain", rr.plain).put("cylTarget", rr.cylTarget)
+                )
+            }
+            ro.put("ranges", rs)
+            val ss = JSONObject()
+            r.suppliers.forEach { (k, v) -> ss.put(k, v) }
+            ro.put("suppliers", ss)
             lo.put("restock", ro)
         }
         val fs = JSONArray()
