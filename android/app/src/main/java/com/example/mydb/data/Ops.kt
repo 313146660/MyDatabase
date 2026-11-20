@@ -457,18 +457,80 @@ fun lowStockOf(lib: MLibrary): List<LowItem> {
     return out.sortedWith(compareBy({ it.qty }, { it.model }, { abs(it.sph) }))
 }
 
-/** 生成发给供货商的纯文本：按型号分组，单光/带散光用不同的补货数量。 */
-fun restockText(lib: MLibrary, plainQty: Int, cylQty: Int): String {
+/* ---------------- 补货清单 ---------------- */
+
+const val RESTOCK_SCOPE_BELOW_TARGET = "below_target"
+const val RESTOCK_SCOPE_LOW_STOCK = "low_stock"
+
+data class RestockItem(
+    val entry: MEntry,
+    val model: String,
+    val sph: Double,
+    val cyl: Double,
+    val qty: Int,
+    val target: Int,
+    val restock: Int
+)
+
+fun restockCfgOf(lib: MLibrary): RestockCfg = lib.restock ?: RestockCfg()
+
+fun restockTargetFor(cfg: RestockCfg, model: String, isPlain: Boolean): Int {
+    val t = cfg.targets[model]
+    val v = if (isPlain) (t?.plain ?: cfg.defaultPlain) else (t?.cyl ?: cfg.defaultCyl)
+    return v.coerceAtLeast(0)
+}
+
+/** 库里出现过的所有型号（去重，按出现顺序）。 */
+fun modelsOf(lib: MLibrary): List<String> {
+    val mx = matrixCfg(lib) ?: return emptyList()
+    val out = linkedSetOf<String>()
+    lib.entries.forEach { e ->
+        val m = (e.values[mx.group.id] ?: "").trim()
+        if (m.isNotEmpty()) out.add(m)
+    }
+    return out.toList()
+}
+
+/** 计算需要补货的规格：补货数 = 目标库存 − 当前库存，>0 才列出。 */
+fun restockItems(lib: MLibrary): List<RestockItem> {
+    val mx = matrixCfg(lib) ?: return emptyList()
+    val cfg = restockCfgOf(lib)
+    val al = alertsOf(lib)
+    val onlyLow = cfg.scope == RESTOCK_SCOPE_LOW_STOCK
+    val out = mutableListOf<RestockItem>()
+    lib.entries.forEach { e ->
+        val model = (e.values[mx.group.id] ?: "").trim()
+        val sph = toPower(e.values[mx.row.id]) ?: return@forEach
+        val cyl = cylValueOf(e, mx)
+        if (model.isEmpty()) return@forEach
+        val raw = e.values[mx.value.id]
+        val qty = if (raw.isNullOrBlank()) 0 else (raw.toDoubleOrNull() ?: 0.0).toInt()
+        if (onlyLow && qty > thresholdFor(al, model, sph, cyl)) return@forEach
+        val target = restockTargetFor(cfg, model, cyl == 0.0)
+        val need = (target - qty).coerceAtLeast(0)
+        if (need <= 0) return@forEach
+        out.add(RestockItem(e, model, sph, cyl, qty, target, need))
+    }
+    return out.sortedWith(compareBy({ it.model }, { it.sph }, { it.cyl }))
+}
+
+/** 生成发给供货商的纯文本：按型号分组，数量 = 目标库存 − 当前库存；含型号小计与合计。 */
+fun restockText(lib: MLibrary): String {
+    val unit = lib.fields.firstOrNull { it.name.contains("库存") }?.unit?.takeIf { it.isNotBlank() } ?: "片"
     val sb = StringBuilder()
-    lowStockOf(lib).groupBy { it.model }.forEach { (model, list) ->
+    var total = 0
+    restockItems(lib).groupBy { it.model }.forEach { (model, list) ->
         if (sb.isNotEmpty()) sb.append("\r\n")
-        sb.append(model).append("\r\n")
-        list.sortedWith(compareBy({ it.sph }, { it.cyl })).forEach { i ->
+        val sum = list.sumOf { it.restock }
+        total += sum
+        sb.append(model).append("  共 ").append(sum).append(" ").append(unit).append("\r\n")
+        list.forEach { i ->
             sb.append(fmtPower(i.sph)).append("ds")
             if (i.cyl != 0.0) sb.append(" / ").append(fmtPower(i.cyl)).append("dc")
-            sb.append("，").append(if (i.cyl == 0.0) plainQty else cylQty).append("\r\n")
+            sb.append("，").append(i.restock).append("\r\n")
         }
     }
+    if (total > 0) sb.append("\r\n合计：").append(total).append(" ").append(unit).append("\r\n")
     return sb.toString().trimEnd()
 }
 

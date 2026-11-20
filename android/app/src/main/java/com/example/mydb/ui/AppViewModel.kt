@@ -72,24 +72,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         Palette.apply(dark)
         AppPrefs.listFontSize = globalFont
         snapshotAt = store.snapshot()?.first
-        s.optJSONArray("batchPresets")?.let { arr ->
+        if (s.has("batchPresets")) {
+            val arr = s.optJSONArray("batchPresets")
             val list = mutableListOf<BatchPreset>()
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val name = o.optString("name", "")
-                if (name.isBlank()) continue
-                list.add(
-                    BatchPreset(
-                        name = name,
-                        allModels = o.optBoolean("allModels", false),
-                        sphMin = o.optString("sphMin", ""),
-                        sphMax = o.optString("sphMax", ""),
-                        cyl = o.optString("cyl", "all"),
-                        qty = o.optString("qty", "")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val name = o.optString("name", "")
+                    if (name.isBlank()) continue
+                    list.add(
+                        BatchPreset(
+                            name = name,
+                            allModels = o.optBoolean("allModels", false),
+                            sphMin = o.optString("sphMin", ""),
+                            sphMax = o.optString("sphMax", ""),
+                            cyl = o.optString("cyl", "all"),
+                            qty = o.optString("qty", "")
+                        )
                     )
-                )
+                }
             }
             batchPresets = list
+        } else {
+            // 首次启动：播种两个内置预设，之后可长按删除，或改完条件用同名保存来覆盖修改
+            batchPresets = listOf(
+                BatchPreset("本型号 -4.00~-1.00 → 4", false, "-4.00", "-1.00", "all", "4"),
+                BatchPreset("本型号 有散光 → 2", false, "", "", "has", "2")
+            )
         }
         s.optJSONObject("searchHistory")?.let { obj ->
             val map = mutableMapOf<String, List<String>>()
@@ -508,6 +517,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         lib.alerts?.rules?.removeAll { it.id == ruleId }
         touch()
         toast("规则已删除")
+    }
+
+    /* ---------------- 补货目标 ---------------- */
+
+    private fun ensureRestock(lib: MLibrary): RestockCfg {
+        if (lib.restock == null) lib.restock = RestockCfg()
+        return lib.restock!!
+    }
+
+    fun setRestockScope(libId: String, scope: String) {
+        val lib = lib(libId) ?: return
+        ensureRestock(lib).scope = scope
+        touch()
+    }
+
+    fun setRestockDefault(libId: String, plain: Int, cyl: Int) {
+        val lib = lib(libId) ?: return
+        val r = ensureRestock(lib)
+        r.defaultPlain = plain.coerceAtLeast(0)
+        r.defaultCyl = cyl.coerceAtLeast(0)
+        touch()
+    }
+
+    /** 设置某型号的补货目标；plain/cyl 为 null 或 ≤0 表示该项留空（用默认）。两项都空则清除该型号配置。 */
+    fun setRestockTarget(libId: String, model: String, plain: Int?, cyl: Int?) {
+        val lib = lib(libId) ?: return
+        val r = ensureRestock(lib)
+        val pEmpty = plain == null || plain <= 0
+        val cEmpty = cyl == null || cyl <= 0
+        if (pEmpty && cEmpty) {
+            r.targets.remove(model)
+        } else {
+            val cur = r.targets[model] ?: RestockTarget()
+            if (!pEmpty) cur.plain = plain!!
+            if (!cEmpty) cur.cyl = cyl!!
+            r.targets[model] = cur
+        }
+        touch()
     }
 
     /* ---------------- CSV ---------------- */

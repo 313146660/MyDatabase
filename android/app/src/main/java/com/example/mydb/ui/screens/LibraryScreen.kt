@@ -714,12 +714,6 @@ private fun BatchSheet(vm: AppViewModel, lib: MLibrary, currentModel: String, on
         qty = p.qty
     }
 
-    val builtins = remember(currentModel) {
-        listOf(
-            BatchPreset("本型号 -4.00~-1.00 → 4", false, "-4.00", "-1.00", "all", "4"),
-            BatchPreset("本型号 有散光 → 2", false, "", "", "has", "2")
-        )
-    }
     val rawMin = toPower(sphMin)
     val rawMax = toPower(sphMax)
     val filter = BatchFilter(
@@ -755,14 +749,15 @@ private fun BatchSheet(vm: AppViewModel, lib: MLibrary, currentModel: String, on
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                builtins.forEach { p ->
-                    PresetChip(p.name, onClick = { applyPreset(p) })
-                }
                 vm.batchPresets.forEach { p ->
                     PresetChip(p.name, onClick = { applyPreset(p) }, onLongClick = { deleteTarget = p.name })
                 }
             }
-            Text("点预设套用；长按自定义预设可删除。", fontSize = 9.5.sp, color = Muted2)
+            Text(
+                if (vm.batchPresets.isEmpty()) "暂无预设，点右上角「保存当前条件」新建"
+                else "点预设套用；长按可删除。改完条件点「保存当前条件」，用同名可覆盖修改。",
+                fontSize = 9.5.sp, color = Muted2
+            )
             Spacer(Modifier.height(14.dp))
 
             Text("范围", fontSize = 11.5.sp, color = Muted)

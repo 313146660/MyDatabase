@@ -36,7 +36,7 @@ android {
     applicationVariants.all {
         outputs.all {
             (this as com.android.build.gradle.api.ApkVariantOutput).outputFileName =
-                "MyDB-$versionName-$name.apk"
+                "MyDB-$versionName.apk"
         }
     }
 }

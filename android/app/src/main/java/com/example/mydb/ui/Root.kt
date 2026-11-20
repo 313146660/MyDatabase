@@ -59,6 +59,7 @@ fun AppRoot(vm: AppViewModel) {
                 is Scr.AlertForm -> AlertFormScreen(vm, current.libId, current.ruleId)
                 is Scr.Csv -> CsvScreen(vm, current.libId)
                 is Scr.Restock -> RestockScreen(vm, current.libId)
+                is Scr.RestockCfg -> RestockConfigScreen(vm, current.libId)
             }
         }
     }

@@ -116,6 +116,17 @@ data class AlertsCfg(
     val rules: MutableList<AlertRule> = mutableListOf()
 )
 
+/** 某个型号的补货目标库存：单光和带散光分开。 */
+data class RestockTarget(var plain: Int = 4, var cyl: Int = 2)
+
+/** 补货清单配置：默认目标、补货范围、各型号单独目标。 */
+data class RestockCfg(
+    var defaultPlain: Int = 4,
+    var defaultCyl: Int = 2,
+    var scope: String = "below_target",
+    val targets: MutableMap<String, RestockTarget> = linkedMapOf()
+)
+
 data class MLibrary(
     val id: String,
     var name: String,
@@ -124,6 +135,7 @@ data class MLibrary(
     var view: String? = null,
     var matrix: MatrixCfg? = null,
     var alerts: AlertsCfg? = null,
+    var restock: RestockCfg? = null,
     var listFields: MutableList<String> = mutableListOf(),
     val fields: MutableList<MField> = mutableListOf(),
     val entries: MutableList<MEntry> = mutableListOf(),
@@ -292,6 +304,21 @@ fun parseLibrary(o: JSONObject): MLibrary {
         }
         lib.alerts = AlertsCfg(a.text("field"), a.int("defaultThreshold", 0), rules)
     }
+    o.optJSONObject("restock")?.let { r ->
+        val targets = linkedMapOf<String, RestockTarget>()
+        r.optJSONObject("targets")?.let { ts ->
+            for (k in ts.keys()) {
+                val t = ts.optJSONObject(k) ?: continue
+                targets[k] = RestockTarget(t.int("plain", 4), t.int("cyl", 2))
+            }
+        }
+        lib.restock = RestockCfg(
+            defaultPlain = r.int("defaultPlain", 4),
+            defaultCyl = r.int("defaultCyl", 2),
+            scope = r.text("scope").ifBlank { "below_target" },
+            targets = targets
+        )
+    }
     return lib
 }
 
@@ -358,6 +385,18 @@ fun MState.toJson(): JSONObject {
             }
             ao.put("rules", rules)
             lo.put("alerts", ao)
+        }
+        lib.restock?.let { r ->
+            val ro = JSONObject()
+                .put("defaultPlain", r.defaultPlain)
+                .put("defaultCyl", r.defaultCyl)
+                .put("scope", r.scope)
+            val ts = JSONObject()
+            r.targets.forEach { (k, t) ->
+                ts.put(k, JSONObject().put("plain", t.plain).put("cyl", t.cyl))
+            }
+            ro.put("targets", ts)
+            lo.put("restock", ro)
         }
         val fs = JSONArray()
         lib.fields.forEach { f ->

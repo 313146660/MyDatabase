@@ -12,6 +12,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,16 +52,13 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
     }
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val items = remember(lib.id, rev) { lowStockOf(lib) }
+    val items = remember(lib.id, rev) { restockItems(lib) }
     val grouped = remember(items) { items.groupBy { it.model } }
     val unit = lib.fields.firstOrNull { it.name.contains("库存") }?.unit ?: "片"
+    val cfg = remember(lib.id, rev) { restockCfgOf(lib) }
 
     var textOpen by rememberSaveable(lib.id) { mutableStateOf(false) }
-    var plainQty by rememberSaveable(lib.id) { mutableStateOf("4") }
-    var cylQty by rememberSaveable(lib.id) { mutableStateOf("2") }
-    val plain = plainQty.toIntOrNull() ?: 4
-    val cylN = cylQty.toIntOrNull() ?: 2
-    val txt = remember(lib.id, rev, plain, cylN) { restockText(lib, plain, cylN) }
+    val txt = remember(lib.id, rev) { restockText(lib) }
 
     val txtName = lib.name.replace(Regex("[\\\\/:*?\"<>|]"), "_") + "-补货-" +
         SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date()) + ".txt"
@@ -78,11 +80,16 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
     Column(Modifier.fillMaxSize().background(Bg)) {
         TopBar(
             title = "补货清单",
-            subtitle = "${lib.name} · ${items.size} 个规格低于阈值",
-            onBack = { vm.back() }
+            subtitle = "${lib.name} · ${items.size} 个规格需补货",
+            onBack = { vm.back() },
+            trailing = {
+                IconButton(onClick = { vm.go(Scr.RestockCfg(lib.id)) }) {
+                    Icon(Icons.Filled.Settings, contentDescription = "目标设置", tint = TextMain)
+                }
+            }
         )
         if (items.isEmpty()) {
-            EmptyBlock("box", "库存都够用", "没有低于提醒阈值的规格")
+            EmptyBlock("box", "库存都到目标了", "没有需要补货的规格")
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
                 item {
@@ -99,12 +106,12 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(model, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextMain, modifier = Modifier.weight(1f))
-                            val zero = list.count { it.qty <= 0 }
+                            val modelSum = list.sumOf { it.restock }
                             Text(
-                                "${list.size} 个" + if (zero > 0) " · $zero 缺货" else "",
-                                fontSize = 10.5.sp,
-                                color = if (zero > 0) Danger else Muted2,
-                                fontWeight = if (zero > 0) FontWeight.SemiBold else FontWeight.Normal
+                                "共 $modelSum $unit",
+                                fontSize = 12.sp,
+                                color = Teal,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -127,12 +134,11 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                             )
                             Spacer(Modifier.weight(1f))
                             Text(
-                                "${item.qty.toInt()} $unit",
-                                fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                                color = if (item.qty <= 0) Danger else Amber
+                                "补 ${item.restock} $unit",
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Teal
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("阈值 ${item.threshold}", fontSize = 10.sp, color = Muted2)
+                            Text("现 ${item.qty} · 目标 ${item.target}", fontSize = 10.sp, color = Muted2)
                             AppIcon("chevron", 15.dp, Muted2)
                         }
                         DividerLine()
@@ -141,8 +147,16 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                 item { Spacer(Modifier.height(6.dp)) }
             }
             Column(Modifier.padding(16.dp)) {
+                val total = items.sumOf { it.restock }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("本次合计", fontSize = 12.sp, color = Muted)
+                    Spacer(Modifier.width(6.dp))
+                    Text("$total $unit", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Teal)
+                }
+                Spacer(Modifier.height(6.dp))
+                val scopeText = if (cfg.scope == RESTOCK_SCOPE_LOW_STOCK) "仅低于提醒阈值" else "全部低于目标"
                 Text(
-                    "补货数量：单光 $plain $unit · 带散光 $cylN $unit",
+                    "范围：$scopeText · 补货数 = 目标库存 − 当前库存",
                     fontSize = 10.5.sp, color = Muted2,
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
@@ -157,34 +171,9 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
                 Text("补货文本", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMain)
                 Text(
-                    "按型号分组，单光按 $plain $unit、带散光按 $cylN $unit 生成，复制后直接发给供货商。",
+                    "按型号分组，数量 = 目标库存 − 当前库存。点右上角「目标设置」调整各型号目标。",
                     fontSize = 11.5.sp, color = Muted2
                 )
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.weight(1f)) {
-                        Column {
-                            Text("单光数量", fontSize = 11.5.sp, color = Muted)
-                            Spacer(Modifier.height(4.dp))
-                            AppTextField(
-                                plainQty,
-                                { t -> plainQty = t.filter { it.isDigit() }.take(3) },
-                                placeholder = "4", keyboardType = KeyboardType.Number
-                            )
-                        }
-                    }
-                    Box(Modifier.weight(1f)) {
-                        Column {
-                            Text("带散光数量", fontSize = 11.5.sp, color = Muted)
-                            Spacer(Modifier.height(4.dp))
-                            AppTextField(
-                                cylQty,
-                                { t -> cylQty = t.filter { it.isDigit() }.take(3) },
-                                placeholder = "2", keyboardType = KeyboardType.Number
-                            )
-                        }
-                    }
-                }
                 Spacer(Modifier.height(12.dp))
                 Box(
                     Modifier.fillMaxWidth().height(300.dp)
@@ -219,6 +208,140 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                     Text("保存为 txt 文件", fontSize = 12.5.sp, color = Primary)
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun RestockConfigScreen(vm: AppViewModel, libId: String) {
+    val rev = vm.rev
+    val lib = vm.lib(libId)
+    if (lib == null) {
+        EmptyBlock("database", "数据库不存在", "它可能已经被删除")
+        return
+    }
+    val cfg = remember(lib.id, rev) { restockCfgOf(lib) }
+    val models = remember(lib.id, rev) { modelsOf(lib) }
+
+    var defPlain by remember(lib.id, rev) { mutableStateOf(cfg.defaultPlain.toString()) }
+    var defCyl by remember(lib.id, rev) { mutableStateOf(cfg.defaultCyl.toString()) }
+    val plainInputs = remember(lib.id, rev) {
+        mutableStateMapOf<String, String>().apply {
+            models.forEach { put(it, cfg.targets[it]?.plain?.toString() ?: "") }
+        }
+    }
+    val cylInputs = remember(lib.id, rev) {
+        mutableStateMapOf<String, String>().apply {
+            models.forEach { put(it, cfg.targets[it]?.cyl?.toString() ?: "") }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Bg)) {
+        TopBar(title = "目标库存设置", subtitle = lib.name, onBack = { vm.back() })
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item { SectionLabel("默认目标（型号未单独设置时使用）") }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(Modifier.weight(1f)) {
+                        Column {
+                            Text("单光目标", fontSize = 11.sp, color = Muted)
+                            AppTextField(defPlain, { defPlain = it.filter { c -> c.isDigit() }.take(3) }, placeholder = "4", keyboardType = KeyboardType.Number)
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        Column {
+                            Text("散光目标", fontSize = 11.sp, color = Muted)
+                            AppTextField(defCyl, { defCyl = it.filter { c -> c.isDigit() }.take(3) }, placeholder = "2", keyboardType = KeyboardType.Number)
+                        }
+                    }
+                }
+            }
+
+            item { SectionLabel("补货范围") }
+            item {
+                ScopeRow("全部低于目标", "库存没到目标值的规格都补货，库存留空按 0 算", cfg.scope != RESTOCK_SCOPE_LOW_STOCK) {
+                    vm.setRestockScope(libId, RESTOCK_SCOPE_BELOW_TARGET)
+                }
+            }
+            item { DividerLine() }
+            item {
+                ScopeRow("仅低于提醒阈值", "只列库存提醒标红的规格，数量仍按补到目标算", cfg.scope == RESTOCK_SCOPE_LOW_STOCK) {
+                    vm.setRestockScope(libId, RESTOCK_SCOPE_LOW_STOCK)
+                }
+            }
+
+            item { SectionLabel("各型号目标（留空 = 用默认）") }
+            if (models.isEmpty()) {
+                item { EmptyBlock("box", "暂无型号", "先在库存里录入型号，再来设置目标") }
+            } else {
+                items(models, key = { it }) { model ->
+                    Row(
+                        Modifier.fillMaxWidth().background(Surface).padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(model, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextMain, modifier = Modifier.weight(1f))
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.width(82.dp)) {
+                            Column {
+                                Text("单光", fontSize = 10.sp, color = Muted)
+                                AppTextField(plainInputs[model].orEmpty(), { plainInputs[model] = it.filter { c -> c.isDigit() }.take(3) }, placeholder = cfg.defaultPlain.toString(), keyboardType = KeyboardType.Number)
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.width(82.dp)) {
+                            Column {
+                                Text("散光", fontSize = 10.sp, color = Muted)
+                                AppTextField(cylInputs[model].orEmpty(), { cylInputs[model] = it.filter { c -> c.isDigit() }.take(3) }, placeholder = cfg.defaultCyl.toString(), keyboardType = KeyboardType.Number)
+                            }
+                        }
+                    }
+                    DividerLine()
+                }
+            }
+
+            item {
+                Column(Modifier.padding(16.dp)) {
+                    PillButton("保存设置", onClick = {
+                        vm.setRestockDefault(libId, defPlain.toIntOrNull() ?: 0, defCyl.toIntOrNull() ?: 0)
+                        models.forEach { m ->
+                            vm.setRestockTarget(libId, m, plainInputs[m]?.toIntOrNull(), cylInputs[m]?.toIntOrNull())
+                        }
+                        vm.toast("目标设置已保存")
+                        vm.back()
+                    }, color = Teal)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        fontSize = 11.sp, color = Muted2, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 16.dp, top = 18.dp, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun ScopeRow(label: String, desc: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+            Text(desc, fontSize = 10.5.sp, color = Muted)
+        }
+        if (selected) {
+            Icon(Icons.Filled.Check, contentDescription = null, tint = Teal, modifier = Modifier.size(18.dp))
         }
     }
 }

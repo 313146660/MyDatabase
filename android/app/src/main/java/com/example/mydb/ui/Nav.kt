@@ -16,4 +16,5 @@ sealed interface Scr {
     data class AlertForm(val libId: String, val ruleId: String?) : Scr
     data class Csv(val libId: String) : Scr
     data class Restock(val libId: String) : Scr
+    data class RestockCfg(val libId: String) : Scr
 }
