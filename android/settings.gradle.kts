@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "MementoClone"
+rootProject.name = "MyDB"
 include(":app")

@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 import com.example.mementoclone.ui.AppRoot
 import com.example.mementoclone.ui.AppViewModel
 import com.example.mementoclone.ui.theme.Bg
-import com.example.mementoclone.ui.theme.MementoTheme
+import com.example.mementoclone.ui.theme.MyDBTheme
 
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MementoTheme {
+            MyDBTheme {
                 Surface(color = Bg) {
                     AppRoot(vm)
                 }

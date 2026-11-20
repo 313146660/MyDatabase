@@ -57,7 +57,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 ) { Text("M", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Memento", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("MyDB", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text("${libs.size} 个数据库 · $total 条记录", color = Color.White.copy(alpha = 0.8f), fontSize = 11.5.sp)
                 }
                 Text("v2.0", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
@@ -127,13 +127,13 @@ fun SettingsScreen(vm: AppViewModel) {
             Spacer(Modifier.height(16.dp))
             Text("关于", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
             MCard(Modifier.fillMaxWidth()) {
-                InfoRow("info", "关于 Memento", "本地优先的个人数据库 · 版本 2.0", Muted)
+                InfoRow("info", "关于 MyDB", "本地优先的个人数据库 · 版本 2.0", Muted)
                 DividerLine()
                 InfoRow("database", "数据说明", "数据保存在本机；换机前请先导出备份", Muted)
             }
             Spacer(Modifier.height(24.dp))
             Text(
-                "Memento 2.0 · 本地存储 · 不收集任何数据",
+                "MyDB 2.0 · 本地存储 · 不收集任何数据",
                 Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 10.5.sp, color = Muted2
             )
             Spacer(Modifier.height(30.dp))
@@ -254,7 +254,7 @@ fun BackupScreen(vm: AppViewModel) {
                         AppTextField(pass, { pass = it }, placeholder = "建议用应用专用密码")
                     }
                     FormRow("远端目录") {
-                        AppTextField(path, { path = it }, placeholder = "Memento")
+                        AppTextField(path, { path = it }, placeholder = "MyDB")
                     }
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -297,7 +297,7 @@ fun BackupScreen(vm: AppViewModel) {
                 Column(Modifier.padding(16.dp)) {
                     Text("换手机怎么迁移", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextMain)
                     Spacer(Modifier.height(4.dp))
-                    Text("1. 在旧手机点「导出备份…」，把 JSON 存到文件管理器或网盘。\n2. 在新手机安装 Memento，进入「备份与恢复 → 从文件恢复」。\n3. 选刚才的 JSON，数据会完整恢复。", fontSize = 11.5.sp, color = Muted)
+                    Text("1. 在旧手机点「导出备份…」，把 JSON 存到文件管理器或网盘。\n2. 在新手机安装 MyDB，进入「备份与恢复 → 从文件恢复」。\n3. 选刚才的 JSON，数据会完整恢复。", fontSize = 11.5.sp, color = Muted)
                 }
             }
             Spacer(Modifier.height(30.dp))

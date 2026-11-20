@@ -152,7 +152,7 @@ private val AppTypography = Typography(
 )
 
 @Composable
-fun MementoTheme(content: @Composable () -> Unit) {
+fun MyDBTheme(content: @Composable () -> Unit) {
     val view = LocalView.current
     val night = Palette.dark
     val scheme = if (night) nightScheme() else lightScheme()

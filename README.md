@@ -38,7 +38,7 @@
 │  ├─ index.html        入口，双击即可运行
 │  ├─ app.js            全部逻辑
 │  └─ styles.css        设计系统与布局
-└─ MementoClone/        Android App（Jetpack Compose，Kotlin）
+└─ android/             Android App（Jetpack Compose，Kotlin）
    ├─ app/              界面、数据层、备份、CSV
    └─ smoketest/        数据层 JVM 自测入口
 ```
@@ -59,13 +59,13 @@ memento-prototype/index.html
 环境：JDK 17、Android SDK 34、Gradle 8.7（仓库带 `gradlew`，也可用本机 Gradle 8.7）。
 
 ```bash
-cd MementoClone
+cd android
 ./gradlew :app:assembleDebug       # Windows: gradlew.bat :app:assembleDebug
 ```
 
-产物：`MementoClone/app/build/outputs/apk/debug/app-debug.apk`。
+产物：`android/app/build/outputs/apk/debug/app-debug.apk`。
 
-首次构建前在 `MementoClone/local.properties` 写 SDK 路径（该文件已被 `.gitignore` 忽略）：
+首次构建前在 `android/local.properties` 写 SDK 路径（该文件已被 `.gitignore` 忽略）：
 
 ```properties
 sdk.dir=/path/to/Android/Sdk
@@ -91,4 +91,4 @@ sdk.dir=/path/to/Android/Sdk
 
 ## 声明
 
-本项目是独立实现，与 Memento Database 及其开发商无关；早期内部名称中出现过 Memento，仅为升级兼容保留了包名。
+本项目是独立实现，与 Memento Database 及其开发商无关。早期内部名称中出现过 Memento，目录名、主题名、类名、UI 显示文字均已替换；仅包名 `com.example.mementoclone` 与备份文件名 `memento-backup.json` 为升级兼容保留的字符串，不涉及商标授权，且 `applicationId` 改名会导致已装应用数据隔离，迁移前请先导出备份。
