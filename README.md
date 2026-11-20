@@ -34,7 +34,7 @@
 
 ```
 .
-├─ memento-prototype/   零依赖网页原型（HTML + CSS + 原生 JS）
+├─ web/                 零依赖网页原型（HTML + CSS + 原生 JS）
 │  ├─ index.html        入口，双击即可运行
 │  ├─ app.js            全部逻辑
 │  └─ styles.css        设计系统与布局
@@ -49,7 +49,7 @@
 
 ```bash
 # 直接用浏览器打开
-memento-prototype/index.html
+web/index.html
 ```
 
 首次打开会写入 5 个演示库到 `localStorage`。数据只存在当前浏览器，清站点数据会丢失；重要数据请用页面里的「备份与恢复」导出。
@@ -91,4 +91,4 @@ sdk.dir=/path/to/Android/Sdk
 
 ## 声明
 
-本项目是独立实现，与 Memento Database 及其开发商无关。早期内部名称中出现过 Memento，目录名、主题名、类名、UI 显示文字均已替换；仅包名 `com.example.mementoclone` 与备份文件名 `memento-backup.json` 为升级兼容保留的字符串，不涉及商标授权，且 `applicationId` 改名会导致已装应用数据隔离，迁移前请先导出备份。
+本项目是独立实现，与 Memento Database 及其开发商无关。早期内部名称中出现过 Memento，目录名、主题名、类名、UI 显示文字、备份主文件名均已替换为 MyDB。仅以下字符串为升级兼容保留：包名 `com.example.mementoclone`（改名会导致已装应用数据隔离）、旧备份文件名 `memento-backup.json`（恢复时作为回退读取，避免老云端备份失效）、以及本地存储键名前缀。这些保留不涉及商标授权，迁移前请先导出备份。

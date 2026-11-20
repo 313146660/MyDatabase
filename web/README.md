@@ -10,7 +10,7 @@
 ## 运行
 
 ```
-memento-prototype/
+web/
 ├─ index.html    入口
 ├─ app.js        全部逻辑（无框架）
 └─ styles.css    设计系统与布局

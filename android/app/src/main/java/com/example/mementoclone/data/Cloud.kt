@@ -14,7 +14,7 @@ data class BkCfg(
     val port: String = "",
     val user: String = "",
     val pass: String = "",
-    val path: String = "Memento",
+    val path: String = "MyDB",
     val auto: Boolean = false,
     val lastLocalAt: Long = 0L,
     val lastCloudAt: Long = 0L
@@ -23,6 +23,8 @@ data class BkCfg(
 data class CloudResult(val ok: Boolean, val message: String)
 
 object Cloud {
+    private const val BK_FILE = "mydb-backup.json"
+    private const val BK_FILE_LEGACY = "memento-backup.json" // 旧备份文件名，恢复时回退读取
     private const val TIMEOUT = 15000
 
     fun configFromJson(o: org.json.JSONObject): BkCfg = BkCfg(
@@ -30,7 +32,7 @@ object Cloud {
         port = o.optString("port", ""),
         user = o.optString("user", ""),
         pass = o.optString("pass", ""),
-        path = o.optString("path", "Memento").ifBlank { "Memento" },
+        path = o.optString("path", "MyDB").ifBlank { "MyDB" },
         auto = o.optBoolean("auto", false),
         lastLocalAt = o.optLong("lastLocalAt", 0L),
         lastCloudAt = o.optLong("lastCloudAt", 0L)
@@ -53,10 +55,10 @@ object Cloud {
         return "$scheme://$host:${c.port.trim()}$path"
     }
 
-    private fun fileUrl(c: BkCfg): String {
+    private fun fileUrl(c: BkCfg, file: String = BK_FILE): String {
         val base = baseUrl(c)
         val dir = c.path.trim().trim('/')
-        return if (dir.isEmpty()) "$base/memento-backup.json" else "$base/$dir/memento-backup.json"
+        return if (dir.isEmpty()) "$base/$file" else "$base/$dir/$file"
     }
 
     private fun dirUrl(c: BkCfg): String? {
@@ -113,8 +115,17 @@ object Cloud {
 
     suspend fun download(c: BkCfg): Pair<CloudResult, String?> = withContext(Dispatchers.IO) {
         try {
-            val conn = open("GET", fileUrl(c), c)
-            val code = conn.responseCode
+            var conn = open("GET", fileUrl(c), c)
+            var code = conn.responseCode
+            // 找不到新文件时回退读旧备份 memento-backup.json
+            if (code == 404) {
+                conn.disconnect()
+                val legacyUrl = fileUrl(c, BK_FILE_LEGACY)
+                if (legacyUrl != fileUrl(c)) {
+                    conn = open("GET", legacyUrl, c)
+                    code = conn.responseCode
+                }
+            }
             if (code !in 200..299) {
                 conn.disconnect()
                 return@withContext CloudResult(false, codeText(code, "恢复")) to null

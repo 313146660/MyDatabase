@@ -3,7 +3,8 @@
 
   const LS_KEY = 'memento_proto_v2';
   const BK_KEY = 'memento_backup_v1';
-  const BK_FILE = 'memento-backup.json';
+  const BK_FILE = 'mydb-backup.json';
+  const BK_FILE_LEGACY = 'memento-backup.json'; // 兼容旧备份，恢复时找不到新文件就回退读它
   const DAY = 86400000;
   const $ = (s, r = document) => r.querySelector(s);
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -244,7 +245,7 @@
   /* ---------------- 备份（本地 / WebDAV） ---------------- */
 
   function loadBk() {
-    const def = { url: '', port: '', user: '', pass: '', path: 'Memento', auto: false, lastLocalAt: 0, lastCloudAt: 0 };
+    const def = { url: '', port: '', user: '', pass: '', path: 'MyDB', auto: false, lastLocalAt: 0, lastCloudAt: 0 };
     try {
       const raw = localStorage.getItem(BK_KEY);
       if (raw) return Object.assign(def, JSON.parse(raw));
@@ -268,13 +269,14 @@
       return base;
     }
   }
-  function bkUrl() {
+  function bkUrlFor(file) {
     const base = bkBase();
     if (!base) return '';
     const dir = String(bk.path || '').trim().replace(/^\/+|\/+$/g, '');
     const parts = dir ? dir.split('/').filter(Boolean).map(encodeURIComponent) : [];
-    return base + (parts.length ? '/' + parts.join('/') : '') + '/' + BK_FILE;
+    return base + (parts.length ? '/' + parts.join('/') : '') + '/' + file;
   }
+  function bkUrl() { return bkUrlFor(BK_FILE); }
   function bkDirUrl() {
     const u = bkUrl();
     return u ? u.replace(/\/[^/]+$/, '') : '';
@@ -288,7 +290,7 @@
     return { Authorization: 'Basic ' + btoa(bin) };
   }
   function bkPayload() {
-    return { app: 'Memento', kind: 'backup', version: 1, exportedAt: new Date().toISOString(), data: state };
+    return { app: 'MyDB', kind: 'backup', version: 1, exportedAt: new Date().toISOString(), data: state };
   }
   function bkText() {
     return JSON.stringify(bkPayload(), null, 2);
@@ -343,7 +345,14 @@
     const url = bkUrl();
     if (!url) { toast('请先填写 WebDAV 地址'); return null; }
     try {
-      const res = await fetch(url, { method: 'GET', headers: bkAuth() });
+      let res = await fetch(url, { method: 'GET', headers: bkAuth() });
+      // 找不到新文件名时回退读旧备份 memento-backup.json
+      if (res.status === 404) {
+        const legacyUrl = bkUrlFor(BK_FILE_LEGACY);
+        if (legacyUrl && legacyUrl !== url) {
+          res = await fetch(legacyUrl, { method: 'GET', headers: bkAuth() });
+        }
+      }
       if (res.status === 404) { toast('云端还没有备份文件'); return null; }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const text = await res.text();
@@ -3184,7 +3193,7 @@
         { name: 'port', label: '端口', value: bk.port, placeholder: '默认端口（如 443 / 80）', hint: '自建 NAS 或反向代理才需要，填了会覆盖地址里的端口' },
         { name: 'user', label: '用户名', value: bk.user, placeholder: '留空表示不需要登录' },
         { name: 'pass', label: '密码 / 应用密码', type: 'password', value: bk.pass, placeholder: '建议用应用专用密码' },
-        { name: 'path', label: '远端目录', value: bk.path, placeholder: 'MyDB', hint: '备份文件会保存为 目录/memento-backup.json' },
+        { name: 'path', label: '远端目录', value: bk.path, placeholder: 'MyDB', hint: '备份文件会保存为 目录/mydb-backup.json（旧版 memento-backup.json 仍可恢复）' },
         { name: 'auto', label: '自动备份', type: 'select', value: bk.auto ? '1' : '', options: [{ value: '', label: '关闭' }, { value: '1', label: '每次修改后自动上传（约 4 秒）' }] }
       ],
       extraHTML: `
@@ -3212,7 +3221,7 @@
         bk.port = String(d.port || '').trim().replace(/[^0-9]/g, '');
         bk.user = String(d.user || '').trim();
         bk.pass = String(d.pass || '');
-        bk.path = String(d.path || '').trim() || 'Memento';
+        bk.path = String(d.path || '').trim() || 'MyDB';
         bk.auto = d.auto === '1';
         saveBk();
         toast('已保存备份设置');
@@ -3262,7 +3271,7 @@
 
   function backupFileName() {
     const d = new Date();
-    return `memento-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
+    return `mydb-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
   }
 
   function markLocalExport() {

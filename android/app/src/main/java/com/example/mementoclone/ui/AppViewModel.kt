@@ -537,7 +537,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun exportName(): String {
         val d = SimpleDateFormat("yyyyMMdd", Locale.CHINA).format(Date())
-        return "memento-backup-$d.json"
+        return "mydb-backup-$d.json"
     }
 
     fun backupSizeText(): String {
@@ -597,7 +597,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveBkConfig(url: String, port: String, user: String, pass: String, path: String, auto: Boolean) {
         bk = bk.copy(
             url = url.trim(), port = port.trim(), user = user.trim(), pass = pass,
-            path = path.trim().ifBlank { "Memento" }, auto = auto
+            path = path.trim().ifBlank { "MyDB" }, auto = auto
         )
         store.saveBk(Cloud.configToJson(bk))
         cloudStatus = "设置已保存"

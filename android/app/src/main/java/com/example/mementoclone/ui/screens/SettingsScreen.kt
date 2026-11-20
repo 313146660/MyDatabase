@@ -239,7 +239,7 @@ fun BackupScreen(vm: AppViewModel) {
             MCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("WebDAV", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMain)
-                    Text("备份文件固定为 目录/memento-backup.json", fontSize = 10.5.sp, color = Muted2)
+                    Text("备份文件保存为 目录/mydb-backup.json（旧版 memento-backup.json 仍可恢复）", fontSize = 10.5.sp, color = Muted2)
                     Spacer(Modifier.height(6.dp))
                     FormRow("WebDAV 地址", "填到账号根目录；不写协议时默认 https") {
                         AppTextField(url, { url = it }, placeholder = "https://dav.example.com/remote.php/dav/files/me")

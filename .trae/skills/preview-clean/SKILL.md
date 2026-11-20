@@ -18,7 +18,7 @@ description: 停止正在后台跑的静态预览服务并清理临时脚本。U
 2. **删临时脚本**
    - 检查 `{workspace}/_preview.ps1` 是否存在。
    - 用 `DeleteFile` 删除；如果 `.gitignore` 里没 `_preview.ps1`，提醒用户加上（但不要自动加——clean 不是改仓库规则的场合）。
-   - 不要删 `memento-prototype/` 或其他源目录，那些是真项目文件。
+   - 不要删 `web/` 或其他源目录，那些是真项目文件。
 
 3. **简短汇报**
    - 报告：停了哪些 command_id / PID，删了哪些文件。

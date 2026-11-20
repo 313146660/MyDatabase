@@ -415,7 +415,7 @@ fun MState.toJson(): JSONObject {
 }
 
 fun backupPayload(state: MState): JSONObject = JSONObject()
-    .put("app", "Memento")
+    .put("app", "MyDB")
     .put("kind", "backup")
     .put("version", 2)
     .put("schemaVersion", 2)

@@ -5,7 +5,7 @@ description: 启动或重启当前 workspace 的静态网页原型预览。Use w
 
 # Preview Cycle
 
-一键启停并重验当前 workspace 的静态网页原型预览。适用于零依赖 HTML + CSS + 原生 JS 项目（如本仓库的 `memento-prototype/`），用 PowerShell + .NET `HttpListener` 跑服务，**不依赖 Python / Node / npm**。
+一键启停并重验当前 workspace 的静态网页原型预览。适用于零依赖 HTML + CSS + 原生 JS 项目（如本仓库的 `web/`），用 PowerShell + .NET `HttpListener` 跑服务，**不依赖 Python / Node / npm**。
 
 ## 流程
 
@@ -24,7 +24,7 @@ description: 启动或重启当前 workspace 的静态网页原型预览。Use w
 
 ```powershell
 param([int]$Port=8000)
-$Root = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "memento-prototype"
+$Root = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "web"
 Add-Type -AssemblyName System.Web
 $L = New-Object System.Net.HttpListener
 $L.Prefixes.Add("http://localhost:$Port/")
@@ -75,4 +75,4 @@ try {
 - `_preview.ps1` 是临时脚本，应该在仓库 `.gitignore` 里有 `_preview.ps1`；如果没有，提示用户加上。
 - 沙箱可能阻止往 `.git/index.lock` 写入，但不影响读 `.git` 目录和运行脚本；真要改 git 才需要 `dangerouslyDisableSandbox: true`。
 - PowerShell 内联字符串里 `$($var.Length)` 会被误判成外部命令，**绝对不要内联写服务器脚本**——写入文件再 `-File` 启动才稳。
-- 如果用户指定了新的入口目录（不是 `memento-prototype`），记得改模板里的 `$Root`。
+- 如果用户指定了新的入口目录（不是 `web`），记得改模板里的 `$Root`。
