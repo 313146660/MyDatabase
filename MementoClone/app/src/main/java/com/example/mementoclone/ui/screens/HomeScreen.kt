@@ -62,7 +62,7 @@ fun HomeScreen(vm: AppViewModel) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("MEMENTO", fontSize = 10.5.sp, letterSpacing = 2.sp, color = Color.White.copy(alpha = 0.65f), fontWeight = FontWeight.Bold)
+                        Text("MYDATABASE", fontSize = 10.5.sp, letterSpacing = 2.sp, color = Color.White.copy(alpha = 0.65f), fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(2.dp))
                         Text("我的数据库", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(todayCn(), fontSize = 11.5.sp, color = Color.White.copy(alpha = 0.7f))
