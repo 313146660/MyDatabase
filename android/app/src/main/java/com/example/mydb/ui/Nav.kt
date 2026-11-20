@@ -18,4 +18,5 @@ sealed interface Scr {
     data class Restock(val libId: String) : Scr
     data class RestockCfg(val libId: String) : Scr
     data class RestockHistory(val libId: String) : Scr
+    data class Stats(val libId: String) : Scr
 }

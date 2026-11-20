@@ -2,6 +2,7 @@ package com.example.mydb.data
 
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import java.util.Calendar
 
 fun libById(state: MState, id: String?): MLibrary? = state.libraries.firstOrNull { it.id == id }
 
@@ -816,4 +817,207 @@ fun stampAutoFields(lib: MLibrary, entry: MEntry, isNew: Boolean) {
             FieldType.UPDATEDAT -> entry.values[f.id] = fmtStamp(now)
         }
     }
+}
+
+/* ---------------- 客户聚合视图 ---------------- */
+
+/** 复查周期（月），按用途区分：远用 18、近用 12、渐进 24。 */
+fun reviewMonths(use: String?): Int = when (use?.trim()) {
+    "近用" -> 12
+    "渐进" -> 24
+    else -> 18
+}
+
+fun moneyFieldOf(lib: MLibrary): MField? =
+    lib.fields.firstOrNull { Regex("合计|金额|价格").containsMatchIn(it.name) }
+
+fun useFieldOf(lib: MLibrary): MField? =
+    lib.fields.firstOrNull { it.name.contains("用途") }
+
+fun lensFieldOf(lib: MLibrary): MField? =
+    lib.fields.firstOrNull { it.name.contains("镜片") }
+
+data class CustomerGroup(
+    val key: String,
+    val display: String,
+    val phone: String,
+    val names: Set<String>,
+    val entries: List<MEntry>,
+    val count: Int,
+    val total: Double,
+    val lastDate: Long?,
+    val monthsSinceLast: Int,
+    val overdue: Boolean
+)
+
+/** 按电话或姓名聚合客户记录。query 非空时只保留组内任一记录命中搜索的组。overdueFirst=true 时超期客户排最前。 */
+fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: Boolean = true): List<CustomerGroup> {
+    val pf = phoneFieldOf(lib)
+    val nf = nameFieldOf(lib)
+    val mf = moneyFieldOf(lib)
+    val uf = useFieldOf(lib)
+    val groups = LinkedHashMap<String, MutableList<MEntry>>()
+    lib.entries.forEach { e ->
+        val k = when (by) {
+            "phone" -> pf?.let { normPhone(e.values[it.id]) }?.takeIf { it.isNotEmpty() }
+            "name" -> nf?.let { nameOf(lib, e) }?.takeIf { it.isNotEmpty() }
+            else -> null
+        } ?: return@forEach
+        groups.getOrPut(k) { mutableListOf() }.add(e)
+    }
+    val now = System.currentTimeMillis()
+    val dayMs = 1000L * 60 * 60 * 24
+    val out = mutableListOf<CustomerGroup>()
+    groups.forEach { (key, list) ->
+        if (query.isNotBlank() && list.none { entryMatches(lib, it, query) }) return@forEach
+        val sorted = list.sortedByDescending { entryDate(lib, it) }
+        val names = linkedSetOf<String>()
+        var total = 0.0
+        sorted.forEach { e ->
+            nf?.let { val n = nameOf(lib, e); if (n.isNotEmpty()) names.add(n) }
+            mf?.let { firstNumberIn(e.values[it.id])?.let { m -> total += m } }
+        }
+        val last = sorted.firstOrNull()?.let { entryDate(lib, it) }
+        val lastUse = sorted.firstOrNull()?.let { uf?.id?.let { id -> it.values[id] } }
+        val months = if (last != null) ((now - last) / (dayMs * 30)).toInt() else 0
+        val display = if (by == "phone") {
+            (names.firstOrNull() ?: "未命名") + if (names.size > 1) " 等${names.size}人" else ""
+        } else {
+            key
+        }
+        val phone = pf?.let { f ->
+            sorted.firstNotNullOfOrNull { normPhone(it.values[f.id]).takeIf { v -> v.isNotEmpty() } }
+        } ?: ""
+        out.add(
+            CustomerGroup(key, display, phone, names, sorted, sorted.size, round2(total),
+                last, months, last != null && months > reviewMonths(lastUse))
+        )
+    }
+    return if (overdueFirst) {
+        out.sortedWith(
+            compareByDescending<CustomerGroup> { it.overdue }.thenByDescending { it.lastDate ?: 0L }
+        )
+    } else {
+        out.sortedWith(compareByDescending<CustomerGroup> { it.lastDate ?: 0L })
+    }
+}
+
+/* ---------------- 客户经营看板 ---------------- */
+
+data class CustomerStats(
+    val records: Int,
+    val customers: Int,
+    val totalRevenue: Double,
+    val avgOrder: Double,
+    val thisMonthNew: Int,
+    val repeatRate: Double,
+    val overdueCount: Int,
+    val topLens: List<Pair<String, Int>>,
+    val useDist: List<Pair<String, Int>>,
+    val monthlyRevenue: List<Pair<String, Double>>
+)
+
+private fun monthLabel(ts: Long): String {
+    val c = Calendar.getInstance().apply { timeInMillis = ts }
+    return "${c.get(Calendar.YEAR)}/${c.get(Calendar.MONTH) + 1}"
+}
+
+fun customerStats(lib: MLibrary): CustomerStats {
+    val pf = phoneFieldOf(lib)
+    val mf = moneyFieldOf(lib)
+    val uf = useFieldOf(lib)
+    val lf = lensFieldOf(lib)
+
+    val phoneFirst = LinkedHashMap<String, Long>()
+    val phoneCount = LinkedHashMap<String, Int>()
+    var revenue = 0.0
+    var paidCount = 0
+    lib.entries.forEach { e ->
+        mf?.let { firstNumberIn(e.values[it.id])?.let { m -> revenue += m; paidCount++ } }
+        pf?.let { f ->
+            val p = normPhone(e.values[f.id])
+            if (p.isNotEmpty()) {
+                val d = entryDate(lib, e)
+                if (!phoneFirst.containsKey(p) || d < phoneFirst[p]!!) phoneFirst[p] = d
+                phoneCount[p] = (phoneCount[p] ?: 0) + 1
+            }
+        }
+    }
+    val customers = phoneFirst.size
+    val thisMonthKey = monthLabel(System.currentTimeMillis())
+    val thisMonthNew = phoneFirst.count { monthLabel(it.value) == thisMonthKey }
+    val repeat = phoneCount.count { it.value >= 2 }
+    val repeatRate = if (customers > 0) round2(repeat.toDouble() / customers * 100) else 0.0
+
+    val overdue = customerGroups(lib, "phone").count { it.overdue }
+
+    val topLens = lf?.let { f ->
+        lib.entries.mapNotNull { (it.values[f.id] ?: "").trim().takeIf { v -> v.isNotEmpty() } }
+            .groupingBy { it }.eachCount().toList().sortedByDescending { it.second }.take(10)
+    } ?: emptyList()
+
+    val useDist = uf?.let { f ->
+        lib.entries.mapNotNull { (it.values[f.id] ?: "").trim().takeIf { v -> v.isNotEmpty() } }
+            .groupingBy { it }.eachCount().toList().sortedByDescending { it.second }
+    } ?: emptyList()
+
+    // 近 12 个月营收（含本月）
+    val monthMap = LinkedHashMap<String, Double>()
+    for (i in 11 downTo 0) {
+        val c = Calendar.getInstance().apply { add(Calendar.MONTH, -i) }
+        monthMap["${c.get(Calendar.YEAR)}/${c.get(Calendar.MONTH) + 1}"] = 0.0
+    }
+    lib.entries.forEach { e ->
+        mf?.let { f ->
+            val m = firstNumberIn(e.values[f.id]) ?: return@forEach
+            val key = monthLabel(entryDate(lib, e))
+            if (monthMap.containsKey(key)) monthMap[key] = (monthMap[key] ?: 0.0) + m
+        }
+    }
+    val monthlyRevenue = monthMap.map { it.key to round2(it.value) }
+
+    return CustomerStats(
+        records = lib.entries.size,
+        customers = customers,
+        totalRevenue = round2(revenue),
+        avgOrder = if (paidCount > 0) round2(revenue / paidCount) else 0.0,
+        thisMonthNew = thisMonthNew,
+        repeatRate = repeatRate,
+        overdueCount = overdue,
+        topLens = topLens,
+        useDist = useDist,
+        monthlyRevenue = monthlyRevenue
+    )
+}
+
+/* ---------------- 配镜出库留痕 ---------------- */
+
+data class PickStockView(
+    val fieldName: String,
+    val model: String,
+    val spec: String,
+    val qty: Int,
+    val stock: Int,
+    val srcLibId: String,
+    val srcEntryId: String,
+    val found: Boolean
+)
+
+/** 取出这条记录所有「扣库存」pick（如 OD / OS）关联的镜片库存条目，用于详情页展示。 */
+fun pickStockViews(state: MState, lib: MLibrary, entry: MEntry): List<PickStockView> {
+    val out = mutableListOf<PickStockView>()
+    lib.fields.forEach { f ->
+        if (f.type != FieldType.PICK) return@forEach
+        val p = f.pick ?: return@forEach
+        if (!p.deduct) return@forEach
+        val ref = entry.picks[f.id] ?: return@forEach
+        val src = libById(state, ref.libId)
+        val sku = src?.entries?.firstOrNull { it.id == ref.entryId }
+        val mx = if (src != null) matrixCfg(src) else null
+        val model = if (sku != null && mx != null) (sku.values[mx.group.id] ?: "") else ""
+        val spec = sku?.let { skuTextOf(src!!, it) } ?: ""
+        val stock = if (sku != null && mx != null) (sku.values[mx.value.id]?.toIntOrNull() ?: 0) else 0
+        out.add(PickStockView(f.name, model, spec, ref.qty, stock, ref.libId, ref.entryId, sku != null))
+    }
+    return out
 }

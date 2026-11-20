@@ -189,6 +189,10 @@ private fun ListContent(
     }
     val history = vm.searchHistory[lib.id].orEmpty()
     var sortMenu by remember { mutableStateOf(false) }
+    var custMode by rememberSaveable(lib.id, rev) { mutableStateOf(false) }
+    var custBy by rememberSaveable(lib.id, rev) { mutableStateOf("phone") }
+    var overduePinned by rememberSaveable(lib.id, rev) { mutableStateOf(true) }
+    val overdueCount = remember(lib.id, rev) { customerGroups(lib, "phone").count { it.overdue } }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item {
@@ -215,6 +219,52 @@ private fun ListContent(
                     Spacer(Modifier.width(8.dp))
                     Pill("${favCount} 个收藏")
                 }
+            }
+        }
+        if (phoneField != null) item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SegButton("记录", !custMode, Modifier.width(56.dp)) { custMode = false }
+                    SegButton("客户", custMode, Modifier.width(56.dp)) { custMode = true }
+                }
+                if (custMode) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SegButton("按电话", custBy == "phone", Modifier.width(62.dp)) { custBy = "phone" }
+                        SegButton("按姓名", custBy == "name", Modifier.width(62.dp)) { custBy = "name" }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (overdueCount > 0) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(10.dp))
+                            .background(if (overduePinned) Danger else soft(TextMain))
+                            .clickable { overduePinned = !overduePinned }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            "超期 $overdueCount${if (overduePinned) " · 置顶" else ""}",
+                            fontSize = 10.5.sp,
+                            color = if (overduePinned) Color.White else Danger,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    "统计", fontSize = 11.5.sp, color = Primary, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(soft(TextMain))
+                        .clickable { vm.go(Scr.Stats(lib.id)) }.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
             }
         }
         item {
@@ -271,7 +321,31 @@ private fun ListContent(
         }
         item { Spacer(Modifier.height(6.dp)) }
 
-        if (all.isEmpty()) {
+        if (custMode && phoneField != null) {
+            val groups = customerGroups(lib, custBy, query, overduePinned).let { list ->
+                when (filter) {
+                    "fav" -> list.filter { g -> g.entries.any { it.favorite } }
+                    "family" -> list.filter { it.names.size > 1 }
+                    else -> list
+                }
+            }
+            if (groups.isEmpty()) {
+                item { EmptyBlock("users", "没有匹配的客户", "试试切换聚合方式或清空搜索") }
+            } else {
+                groups.forEach { g ->
+                    item(key = "cg-${g.key}") { CustomerGroupHeader(g, color) }
+                    items(g.entries, key = { "cge-${g.key}-${it.id}" }) { entry ->
+                        CustomerEntryRow(vm, lib, entry, color) {
+                            if (query.isNotBlank()) vm.addSearchQuery(lib.id, query)
+                            vm.go(Scr.Detail(lib.id, entry.id))
+                        }
+                    }
+                }
+                item {
+                    Text("共 ${groups.size} 位客户", Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = TextAlign.Center, fontSize = 10.5.sp, color = Muted2)
+                }
+            }
+        } else if (all.isEmpty()) {
             item { EmptyBlock("database", "还没有记录", "点右下角的 + 添加第一条记录") }
         } else {
             val visible = all.take(limit)
@@ -400,6 +474,65 @@ fun stampOf(lib: MLibrary, entry: MEntry): String {
         if (d.get(java.util.Calendar.YEAR) == java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
             "${d.get(java.util.Calendar.MONTH) + 1}/${d.get(java.util.Calendar.DAY_OF_MONTH)}"
         else fmtDay(ts)
+    }
+}
+
+/* ---------------- 客户聚合视图 ---------------- */
+
+@Composable
+private fun CustomerGroupHeader(g: CustomerGroup, color: Color) {
+    val totalStr = if (g.total == g.total.toInt().toDouble()) g.total.toInt().toString() else g.total.toString()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp)).background(Surface)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) { Text(if (g.names.size > 1) "家" else "人", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color) }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(g.display, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextMain, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (g.overdue) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("超期", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Danger).padding(horizontal = 6.dp, vertical = 1.dp))
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            val last = g.lastDate?.let { fmtDay(it) } ?: "—"
+            Text("配镜 ${g.count} 次 · 累计 ¥$totalStr · 最近 $last", fontSize = 10.5.sp, color = Muted2)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("${g.monthsSinceLast}月前", fontSize = 10.5.sp, color = if (g.overdue) Danger else Muted2, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun CustomerEntryRow(vm: AppViewModel, lib: MLibrary, entry: MEntry, color: Color, onClick: () -> Unit) {
+    val mf = moneyFieldOf(lib)
+    val amt = mf?.let { firstNumberIn(entry.values[it.id]) }
+    val amtStr = if (amt != null && amt == amt.toInt().toDouble()) amt.toInt().toString() else amt?.toString()
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp)
+            .clip(RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp))
+            .background(soft(TextMain)).clickable(onClick = onClick)
+            .padding(start = 10.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(3.dp).height(28.dp).clip(RoundedCornerShape(2.dp)).background(color.copy(alpha = 0.5f)))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(stampOf(lib, entry), fontSize = 10.5.sp, color = Muted2)
+            Spacer(Modifier.height(1.dp))
+            Text(titleOf(lib, entry), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (amtStr != null) {
+            Text("¥$amtStr", fontSize = 12.sp, color = Primary, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

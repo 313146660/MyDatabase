@@ -57,6 +57,7 @@ fun DetailScreen(vm: AppViewModel, libId: String, entryId: String) {
     val history = historyOf(lib, entry)
     val family = familyGroup(lib, entry)
     val related = relatedFor(vm.state, lib, entry)
+    val picks = remember(rev, entry.id) { pickStockViews(vm.state, lib, entry) }
     val clipboard = LocalClipboardManager.current
     val phoneVal = phoneFieldOf(lib)?.let { oneLine(entry.values[it.id]) }.orEmpty()
 
@@ -190,6 +191,41 @@ fun DetailScreen(vm: AppViewModel, libId: String, entryId: String) {
                 history.forEachIndexed { i, item ->
                     val prev = history.getOrNull(i + 1)
                     HistoryCard(vm, lib, item, prev?.entry, onOpen = { vm.openDetail(lib.id, it) })
+                }
+            }
+
+            if (picks.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("配镜出库", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextMain)
+                    Spacer(Modifier.width(6.dp))
+                    Text("本条记录扣减的镜片", fontSize = 10.5.sp, color = Muted2)
+                }
+                Spacer(Modifier.height(6.dp))
+                MCard(Modifier.fillMaxWidth()) {
+                    picks.forEachIndexed { i, p ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable(enabled = p.found) { vm.openDetail(p.srcLibId, p.srcEntryId) }
+                                .padding(horizontal = 15.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                val title = (p.model + " " + p.spec).trim()
+                                Text(title.ifBlank { p.fieldName }, fontSize = 13.sp, color = TextMain, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    if (p.found) "${p.fieldName} · 库存 ${p.stock}" else "${p.fieldName} · 库存条目已删除",
+                                    fontSize = 10.5.sp, color = if (p.found) Muted2 else Danger
+                                )
+                            }
+                            Text("×${p.qty}", fontSize = 13.sp, color = Primary, fontWeight = FontWeight.SemiBold)
+                            if (p.found) {
+                                Spacer(Modifier.width(6.dp))
+                                AppIcon("chevron", 15.dp, Muted2)
+                            }
+                        }
+                        if (i != picks.lastIndex) DividerLine()
+                    }
                 }
             }
 

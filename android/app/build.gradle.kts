@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.mydb"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "2.11"
+        versionCode = 15
+        versionName = "2.13"
     }
     buildFeatures {
         compose = true
