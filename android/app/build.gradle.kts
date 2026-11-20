@@ -14,7 +14,10 @@ android {
         versionCode = 11
         versionName = "2.9"
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -29,6 +32,12 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+    applicationVariants.all {
+        outputs.all {
+            (this as com.android.build.gradle.api.ApkVariantOutput).outputFileName =
+                "MyDB-$versionName-$name.apk"
+        }
     }
 }
 

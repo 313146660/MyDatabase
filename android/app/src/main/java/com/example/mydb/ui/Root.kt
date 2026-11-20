@@ -50,6 +50,7 @@ fun AppRoot(vm: AppViewModel) {
                 is Scr.Detail -> DetailScreen(vm, current.libId, current.entryId)
                 is Scr.Editor -> EditorScreen(vm, current.libId, current.entryId)
                 is Scr.Backup -> BackupScreen(vm)
+                is Scr.About -> AboutScreen(vm)
                 is Scr.Fields -> FieldsScreen(vm, current.libId)
                 is Scr.FieldForm -> FieldFormScreen(vm, current.libId, current.fieldId)
                 is Scr.ListFields -> ListFieldsScreen(vm, current.libId)

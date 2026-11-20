@@ -7,6 +7,7 @@ sealed interface Scr {
     data class Detail(val libId: String, val entryId: String) : Scr
     data class Editor(val libId: String, val entryId: String?) : Scr
     data object Backup : Scr
+    data object About : Scr
     data class Fields(val libId: String) : Scr
     data class FieldForm(val libId: String, val fieldId: String?) : Scr
     data class ListFields(val libId: String) : Scr
