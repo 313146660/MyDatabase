@@ -60,6 +60,7 @@ fun AppRoot(vm: AppViewModel) {
                 is Scr.Csv -> CsvScreen(vm, current.libId)
                 is Scr.Restock -> RestockScreen(vm, current.libId)
                 is Scr.RestockCfg -> RestockConfigScreen(vm, current.libId)
+                is Scr.RestockHistory -> RestockHistoryScreen(vm, current.libId)
             }
         }
     }

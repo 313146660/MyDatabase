@@ -1,5 +1,6 @@
 package com.example.mydb.ui.screens
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -14,7 +15,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -32,6 +35,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mydb.data.*
@@ -70,6 +74,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                 ctx.contentResolver.openOutputStream(uri)?.use {
                     it.write(("\uFEFF" + txt).toByteArray(Charsets.UTF_8))
                 }
+                vm.addRestockHistory(lib.id, txt, items.sumOf { it.restock }, items.size)
                 vm.toast("已保存补货文本")
             } catch (e: Exception) {
                 vm.toast("保存失败：" + (e.message ?: ""))
@@ -83,6 +88,9 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
             subtitle = "${lib.name} · ${items.size} 个规格需补货",
             onBack = { vm.back() },
             trailing = {
+                IconButton(onClick = { vm.go(Scr.RestockHistory(lib.id)) }) {
+                    Text("历史", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                }
                 IconButton(onClick = { vm.go(Scr.RestockCfg(lib.id)) }) {
                     Icon(Icons.Filled.Settings, contentDescription = "目标设置", tint = TextMain)
                 }
@@ -107,6 +115,11 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                         ) {
                             Text(model, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextMain, modifier = Modifier.weight(1f))
                             val modelSum = list.sumOf { it.restock }
+                            val outCnt = list.count { it.isOut }
+                            if (outCnt > 0) {
+                                Text("缺货 $outCnt", fontSize = 11.sp, color = Danger, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.width(8.dp))
+                            }
                             Text(
                                 "共 $modelSum $unit",
                                 fontSize = 12.sp,
@@ -117,8 +130,9 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                     }
                     items(list.size, key = { i -> list[i].entry.id }) { i ->
                         val item = list[i]
+                        val numColor = if (item.isOut) Danger else Teal
                         Row(
-                            Modifier.fillMaxWidth().background(Surface)
+                            Modifier.fillMaxWidth().background(if (item.isOut) Danger.copy(alpha = 0.08f) else Surface)
                                 .clickable { vm.openDetail(lib.id, item.entry.id) }
                                 .padding(horizontal = 16.dp, vertical = 11.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -132,10 +146,14 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                                 if (item.cyl == 0.0) "单光" else fmtPower(item.cyl),
                                 fontSize = 12.sp, color = Muted, modifier = Modifier.width(64.dp)
                             )
+                            if (item.isOut) {
+                                Text("缺货", fontSize = 10.sp, color = Danger, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(end = 4.dp))
+                            }
                             Spacer(Modifier.weight(1f))
                             Text(
                                 "补 ${item.restock} $unit",
-                                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Teal
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = numColor
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("现 ${item.qty} · 目标 ${item.target}", fontSize = 10.sp, color = Muted2)
@@ -195,17 +213,31 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                 PillButton(
                     "复制全部（${items.size} 个规格）",
                     onClick = {
+                        vm.addRestockHistory(lib.id, txt, items.sumOf { it.restock }, items.size)
                         clipboard.setText(AnnotatedString(txt))
                         vm.toast("已复制补货文本")
                     },
                     color = Teal
                 )
                 Spacer(Modifier.height(4.dp))
-                TextButton(
-                    onClick = { saveLauncher.launch(txtName) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("保存为 txt 文件", fontSize = 12.5.sp, color = Primary)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            vm.addRestockHistory(lib.id, txt, items.sumOf { it.restock }, items.size)
+                            shareRestockText(ctx, "${lib.name} 补货清单", txt)
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null, tint = Primary, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("分享给供货商", fontSize = 12.5.sp, color = Primary)
+                    }
+                    TextButton(
+                        onClick = { saveLauncher.launch(txtName) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("保存为 txt", fontSize = 12.5.sp, color = Primary)
+                    }
                 }
             }
         }
@@ -342,6 +374,127 @@ private fun ScopeRow(label: String, desc: String, selected: Boolean, onClick: ()
         }
         if (selected) {
             Icon(Icons.Filled.Check, contentDescription = null, tint = Teal, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** 调起系统分享面板，把补货文本发给供货商（微信/QQ 等）。 */
+private fun shareRestockText(ctx: android.content.Context, subject: String, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    ctx.startActivity(Intent.createChooser(intent, "分享补货文本"))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RestockHistoryScreen(vm: AppViewModel, libId: String) {
+    val rev = vm.rev
+    val lib = vm.lib(libId)
+    val all = vm.restockHistory
+    val records = remember(all, libId, rev) { all.filter { it.libId == libId } }
+    val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
+    var openId by rememberSaveable(libId) { mutableStateOf<String?>(null) }
+    val openRec = records.firstOrNull { it.id == openId }
+    val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA) }
+
+    Column(Modifier.fillMaxSize().background(Bg)) {
+        TopBar(
+            title = "补货历史",
+            subtitle = lib?.name,
+            onBack = { vm.back() },
+            trailing = {
+                if (records.isNotEmpty()) {
+                    IconButton(onClick = {
+                        vm.clearRestockHistory(libId)
+                        openId = null
+                        vm.toast("已清空补货历史")
+                    }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "清空", tint = Danger)
+                    }
+                }
+            }
+        )
+        if (records.isEmpty()) {
+            EmptyBlock("doc", "还没有补货记录", "生成补货文本后，复制 / 分享 / 保存都会自动记到这里")
+        } else {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
+                items(records, key = { it.id }) { rec ->
+                    Row(
+                        Modifier.fillMaxWidth().background(Surface)
+                            .clickable { openId = rec.id }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(fmt.format(Date(rec.at)), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                            Text("${rec.count} 个规格 · 共 ${rec.total} 片", fontSize = 11.sp, color = Muted)
+                            Text(
+                                rec.text.lineSequence().firstOrNull().orEmpty(),
+                                fontSize = 10.5.sp, color = Muted2,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                        IconButton(onClick = {
+                            vm.deleteRestockHistory(rec.id)
+                            if (openId == rec.id) openId = null
+                            vm.toast("已删除")
+                        }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除", tint = Muted, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    DividerLine()
+                }
+            }
+        }
+    }
+
+    if (openRec != null) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(onDismissRequest = { openId = null }, sheetState = sheetState, containerColor = Surface) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+                Text("补货文本", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMain)
+                Text(
+                    fmt.format(Date(openRec.at)) + " · ${openRec.count} 个规格 · 共 ${openRec.total} 片",
+                    fontSize = 11.5.sp, color = Muted2
+                )
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(300.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(Bg)
+                        .padding(12.dp)
+                ) {
+                    SelectionContainer {
+                        Text(
+                            openRec.text,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 19.sp,
+                            color = TextMain,
+                            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                PillButton("复制全部", onClick = {
+                    clipboard.setText(AnnotatedString(openRec.text))
+                    vm.toast("已复制")
+                }, color = Teal)
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = { shareRestockText(ctx, "${openRec.libName} 补货清单", openRec.text) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null, tint = Primary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("分享给供货商", fontSize = 12.5.sp, color = Primary)
+                }
+            }
         }
     }
 }

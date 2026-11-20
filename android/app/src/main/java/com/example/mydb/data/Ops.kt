@@ -470,6 +470,20 @@ data class RestockItem(
     val qty: Int,
     val target: Int,
     val restock: Int
+) {
+    /** 缺货：当前库存为 0（含留空）。补货清单里缺货排最前、标红。 */
+    val isOut: Boolean get() = qty <= 0
+}
+
+/** 一条补货历史记录：某次生成并复制/分享/保存过的补货文本快照。 */
+data class RestockRecord(
+    val id: String,
+    val libId: String,
+    val libName: String,
+    val at: Long,
+    val total: Int,
+    val count: Int,
+    val text: String
 )
 
 fun restockCfgOf(lib: MLibrary): RestockCfg = lib.restock ?: RestockCfg()
@@ -511,10 +525,12 @@ fun restockItems(lib: MLibrary): List<RestockItem> {
         if (need <= 0) return@forEach
         out.add(RestockItem(e, model, sph, cyl, qty, target, need))
     }
-    return out.sortedWith(compareBy({ it.model }, { it.sph }, { it.cyl }))
+    // 同型号内按度数排序：球镜浅→深（绝对值升序），同球镜下单光在前、散光柱镜浅→深
+    return out.sortedWith(compareBy({ it.model }, { abs(it.sph) }, { it.sph }, { abs(it.cyl) }, { it.cyl }))
 }
 
-/** 生成发给供货商的纯文本：按型号分组，数量 = 目标库存 − 当前库存；含型号小计与合计。 */
+/** 生成发给供货商的纯文本：按型号分组，数量 = 目标库存 − 当前库存；含型号小计与合计。
+ *  同型号内按度数浅→深排序，不在文本里加段标签。 */
 fun restockText(lib: MLibrary): String {
     val unit = lib.fields.firstOrNull { it.name.contains("库存") }?.unit?.takeIf { it.isNotBlank() } ?: "片"
     val sb = StringBuilder()
@@ -524,14 +540,48 @@ fun restockText(lib: MLibrary): String {
         val sum = list.sumOf { it.restock }
         total += sum
         sb.append(model).append("  共 ").append(sum).append(" ").append(unit).append("\r\n")
-        list.forEach { i ->
-            sb.append(fmtPower(i.sph)).append("ds")
-            if (i.cyl != 0.0) sb.append(" / ").append(fmtPower(i.cyl)).append("dc")
-            sb.append("，").append(i.restock).append("\r\n")
-        }
+        list.forEach { appendRestockLine(sb, it) }
     }
     if (total > 0) sb.append("\r\n合计：").append(total).append(" ").append(unit).append("\r\n")
     return sb.toString().trimEnd()
+}
+
+private fun appendRestockLine(sb: StringBuilder, i: RestockItem) {
+    sb.append(fmtPower(i.sph)).append("ds")
+    if (i.cyl != 0.0) sb.append(" / ").append(fmtPower(i.cyl)).append("dc")
+    sb.append("，").append(i.restock).append("\r\n")
+}
+
+fun restockHistoryFromJson(arr: org.json.JSONArray?): List<RestockRecord> {
+    if (arr == null) return emptyList()
+    val out = mutableListOf<RestockRecord>()
+    for (i in 0 until arr.length()) {
+        val o = arr.optJSONObject(i) ?: continue
+        out.add(
+            RestockRecord(
+                id = o.optString("id"),
+                libId = o.optString("libId"),
+                libName = o.optString("libName"),
+                at = o.optLong("at"),
+                total = o.optInt("total"),
+                count = o.optInt("count"),
+                text = o.optString("text")
+            )
+        )
+    }
+    return out
+}
+
+fun restockHistoryToJson(list: List<RestockRecord>): org.json.JSONArray {
+    val arr = org.json.JSONArray()
+    list.forEach { r ->
+        arr.put(
+            org.json.JSONObject()
+                .put("id", r.id).put("libId", r.libId).put("libName", r.libName)
+                .put("at", r.at).put("total", r.total).put("count", r.count).put("text", r.text)
+        )
+    }
+    return arr
 }
 
 /** 所有库的低库存，用于首页 */fun lowStockAll(state: MState): List<Pair<MLibrary, List<LowItem>>> =

@@ -57,6 +57,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var searchHistory by mutableStateOf<Map<String, List<String>>>(emptyMap())
         private set
 
+    /** 补货历史记录（所有库混合，按时间倒序），最多保留 50 条。 */
+    var restockHistory by mutableStateOf<List<RestockRecord>>(emptyList())
+        private set
+
     var canUndoBatch by mutableStateOf(false)
         private set
 
@@ -113,6 +117,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             searchHistory = map
         }
+        restockHistory = restockHistoryFromJson(s.optJSONArray("restockHistory"))
         ensureAllMeta()
         if (stack.isEmpty()) stack.add(Scr.Home)
     }
@@ -131,6 +136,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.saveSettings(
             JSONObject().put("darkMode", dark).put("listFontSize", globalFont)
                 .put("batchPresets", arr).put("searchHistory", hist)
+                .put("restockHistory", restockHistoryToJson(restockHistory))
         )
     }
 
@@ -147,6 +153,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun clearSearchHistory(libId: String) {
         if (!searchHistory.containsKey(libId)) return
         searchHistory = searchHistory - libId
+        persistSettings()
+    }
+
+    /** 记录一次补货文本快照（复制/分享/保存时调用）。与最近一条同库文本相同则去重。 */
+    fun addRestockHistory(libId: String, text: String, total: Int, count: Int) {
+        if (text.isBlank()) return
+        val last = restockHistory.firstOrNull()
+        if (last != null && last.libId == libId && last.text == text) return
+        val rec = RestockRecord(
+            id = java.util.UUID.randomUUID().toString(),
+            libId = libId, libName = lib(libId)?.name ?: "",
+            at = System.currentTimeMillis(),
+            total = total, count = count, text = text
+        )
+        restockHistory = (listOf(rec) + restockHistory).take(50)
+        persistSettings()
+    }
+
+    fun deleteRestockHistory(id: String) {
+        restockHistory = restockHistory.filter { it.id != id }
+        persistSettings()
+    }
+
+    /** 清空补货历史；libId 为空时清空全部。 */
+    fun clearRestockHistory(libId: String? = null) {
+        restockHistory = if (libId == null) emptyList() else restockHistory.filter { it.libId != libId }
         persistSettings()
     }
 
