@@ -10,9 +10,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mydb.data.*
 import com.example.mydb.ui.theme.Palette
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -21,7 +23,12 @@ import java.util.Locale
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
 
-    var state: MState = store.load().first
+    /** 启动时先占位，真实数据由 init 中的 IO 协程解析完成后替换。 */
+    var state: MState = MState()
+        private set
+
+    /** 启动加载中：界面显示加载页，期间禁止落盘以免覆盖真实数据。 */
+    var booting by mutableStateOf(true)
         private set
 
     var rev by mutableIntStateOf(0)
@@ -32,7 +39,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var toastText by mutableStateOf<String?>(null)
         private set
 
-    var bk by mutableStateOf(Cloud.configFromJson(store.getBk()))
+    var bk by mutableStateOf(Cloud.configFromJson(JSONObject()))
         private set
 
     var cloudStatus by mutableStateOf("")
@@ -70,56 +77,83 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var cloudJob: Job? = null
 
     init {
-        val s = store.settings()
-        dark = s.optBoolean("darkMode", false)
-        globalFont = (s.optInt("listFontSize", 14)).coerceIn(10, 26)
-        Palette.apply(dark)
-        AppPrefs.listFontSize = globalFont
-        snapshotAt = store.snapshot()?.first
-        if (s.has("batchPresets")) {
-            val arr = s.optJSONArray("batchPresets")
-            val list = mutableListOf<BatchPreset>()
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    val name = o.optString("name", "")
-                    if (name.isBlank()) continue
-                    list.add(
-                        BatchPreset(
-                            name = name,
-                            allModels = o.optBoolean("allModels", false),
-                            sphMin = o.optString("sphMin", ""),
-                            sphMax = o.optString("sphMax", ""),
-                            cyl = o.optString("cyl", "all"),
-                            qty = o.optString("qty", "")
+        if (stack.isEmpty()) stack.add(Scr.Home)
+        // 冷启动：prefs 首次读写（含整库 JSON 的 XML 加载）与整库解析全部放到 IO 线程，
+        // 完成后一次性应用到 UI 状态，避免主线程等待磁盘 I/O 与 JSON 解析。
+        viewModelScope.launch {
+            val s = withContext(Dispatchers.IO) { store.settings() }
+            val loaded = withContext(Dispatchers.IO) { store.load().first }
+            val snapAt = withContext(Dispatchers.IO) { store.snapshot()?.first }
+            val bkJson = withContext(Dispatchers.IO) { store.getBk() }
+
+            dark = s.optBoolean("darkMode", false)
+            globalFont = (s.optInt("listFontSize", 14)).coerceIn(10, 26)
+            Palette.apply(dark)
+            AppPrefs.listFontSize = globalFont
+            snapshotAt = snapAt
+            bk = Cloud.configFromJson(bkJson)
+            if (s.has("batchPresets")) {
+                val arr = s.optJSONArray("batchPresets")
+                val list = mutableListOf<BatchPreset>()
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val o = arr.optJSONObject(i) ?: continue
+                        val name = o.optString("name", "")
+                        if (name.isBlank()) continue
+                        list.add(
+                            BatchPreset(
+                                name = name,
+                                allModels = o.optBoolean("allModels", false),
+                                sphMin = o.optString("sphMin", ""),
+                                sphMax = o.optString("sphMax", ""),
+                                cyl = o.optString("cyl", "all"),
+                                qty = o.optString("qty", "")
+                            )
                         )
+                    }
+                }
+                batchPresets = list
+            } else {
+                // 首次启动：播种两个内置预设，之后可长按删除，或改完条件用同名保存来覆盖修改
+                batchPresets = listOf(
+                    BatchPreset("本型号 -4.00~-1.00 → 4", false, "-4.00", "-1.00", "all", "4"),
+                    BatchPreset("本型号 有散光 → 2", false, "", "", "has", "2")
+                )
+            }
+            s.optJSONObject("searchHistory")?.let { obj ->
+                val map = mutableMapOf<String, List<String>>()
+                obj.keys().forEach { libId ->
+                    val arr = obj.optJSONArray(libId) ?: return@forEach
+                    val list = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        val q = arr.optString(i, "").trim()
+                        if (q.isNotEmpty()) list.add(q)
+                    }
+                    if (list.isNotEmpty()) map[libId] = list
+                }
+                searchHistory = map
+            }
+            restockHistory = restockHistoryFromJson(s.optJSONArray("restockHistory"))
+
+            s.optJSONObject("custViews")?.let { obj ->
+                val map = mutableMapOf<String, CustView>()
+                obj.keys().forEach { libId ->
+                    val o = obj.optJSONObject(libId) ?: return@forEach
+                    map[libId] = CustView(
+                        mode = o.optBoolean("mode", false),
+                        by = o.optString("by", "phone"),
+                        pinned = o.optBoolean("pinned", true),
+                        sort = o.optString("sort", "last_desc")
                     )
                 }
+                if (map.isNotEmpty()) custViews = map
             }
-            batchPresets = list
-        } else {
-            // 首次启动：播种两个内置预设，之后可长按删除，或改完条件用同名保存来覆盖修改
-            batchPresets = listOf(
-                BatchPreset("本型号 -4.00~-1.00 → 4", false, "-4.00", "-1.00", "all", "4"),
-                BatchPreset("本型号 有散光 → 2", false, "", "", "has", "2")
-            )
+
+            state = loaded
+            ensureAllMeta()
+            rev++
+            booting = false
         }
-        s.optJSONObject("searchHistory")?.let { obj ->
-            val map = mutableMapOf<String, List<String>>()
-            obj.keys().forEach { libId ->
-                val arr = obj.optJSONArray(libId) ?: return@forEach
-                val list = mutableListOf<String>()
-                for (i in 0 until arr.length()) {
-                    val q = arr.optString(i, "").trim()
-                    if (q.isNotEmpty()) list.add(q)
-                }
-                if (list.isNotEmpty()) map[libId] = list
-            }
-            searchHistory = map
-        }
-        restockHistory = restockHistoryFromJson(s.optJSONArray("restockHistory"))
-        ensureAllMeta()
-        if (stack.isEmpty()) stack.add(Scr.Home)
     }
 
     private fun persistSettings() {
@@ -133,10 +167,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         val hist = JSONObject()
         searchHistory.forEach { (libId, list) -> hist.put(libId, org.json.JSONArray(list)) }
+        val cvs = JSONObject()
+        custViews.forEach { (libId, cv) ->
+            cvs.put(
+                libId,
+                JSONObject().put("mode", cv.mode).put("by", cv.by)
+                    .put("pinned", cv.pinned).put("sort", cv.sort)
+            )
+        }
         store.saveSettings(
             JSONObject().put("darkMode", dark).put("listFontSize", globalFont)
                 .put("batchPresets", arr).put("searchHistory", hist)
                 .put("restockHistory", restockHistoryToJson(restockHistory))
+                .put("custViews", cvs)
         )
     }
 
@@ -182,6 +225,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 清空补货历史；libId 为空时清空全部。 */
     fun clearRestockHistory(libId: String? = null) {
         restockHistory = if (libId == null) emptyList() else restockHistory.filter { it.libId != libId }
+        persistSettings()
+    }
+
+    /** 客户视图偏好：按库记忆，离开客户库再进来不会重置 */
+    data class CustView(
+        val mode: Boolean = false,
+        val by: String = "phone",
+        val pinned: Boolean = true,
+        val sort: String = "last_desc"
+    )
+
+    var custViews by mutableStateOf<Map<String, CustView>>(emptyMap())
+        private set
+
+    fun custViewOf(libId: String): CustView = custViews[libId] ?: CustView()
+
+    fun updateCustView(libId: String, f: (CustView) -> CustView) {
+        val next = f(custViewOf(libId))
+        if (next == custViewOf(libId)) return
+        custViews = custViews + (libId to next)
         persistSettings()
     }
 
@@ -232,17 +295,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun touch() {
+        if (booting) return
         rev++
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(350)
-            store.commit(state)
+            val json = withContext(Dispatchers.IO) { state.toJson().toString() }
+            store.commitJson(json)
         }
         if (bk.auto && bk.url.isNotBlank()) {
             cloudJob?.cancel()
             cloudJob = viewModelScope.launch {
                 delay(6000)
-                val r = Cloud.upload(bk, exportText())
+                val json = withContext(Dispatchers.IO) { exportText() }
+                val r = Cloud.upload(bk, json)
                 if (r.ok) {
                     bk = bk.copy(lastCloudAt = System.currentTimeMillis())
                     store.saveBk(Cloud.configToJson(bk))
@@ -253,14 +319,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveNow() {
+        if (booting) return
         saveJob?.cancel()
-        store.commit(state)
+        viewModelScope.launch {
+            val json = withContext(Dispatchers.IO) { state.toJson().toString() }
+            store.commitJson(json)
+        }
     }
 
     override fun onCleared() {
         super.onCleared()
+        if (booting) return
         saveJob?.cancel()
-        store.commit(state)
+        viewModelScope.launch {
+            val json = withContext(Dispatchers.IO) { state.toJson().toString() }
+            store.commitJson(json)
+        }
     }
 
     private fun ensureAllMeta() {
@@ -686,42 +760,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return if (bytes < 1024) "$bytes B" else String.format(Locale.US, "%.1f KB", bytes / 1024.0)
     }
 
-    fun importText(text: String): Boolean {
-        return try {
-            val s = parseBackup(text)
-            if (s.libraries.isEmpty()) return false
-            store.saveSnapshot(state.toJson().toString())
-            snapshotAt = System.currentTimeMillis()
-            state = s
-            ensureAllMeta()
-            stack.clear()
-            stack.add(Scr.Home)
-            touch()
-            saveNow()
-            true
-        } catch (_: Exception) {
-            false
-        }
+    suspend fun importText(text: String): Boolean {
+        // 解析整库 JSON 与生成快照都在 IO 线程完成，只把状态应用留在主线程
+        val parsed = withContext(Dispatchers.IO) {
+            try {
+                val s = parseBackup(text)
+                if (s.libraries.isEmpty()) null else s to state.toJson().toString()
+            } catch (_: Exception) {
+                null
+            }
+        } ?: return false
+        withContext(Dispatchers.IO) { store.saveSnapshot(parsed.second) }
+        snapshotAt = System.currentTimeMillis()
+        state = parsed.first
+        ensureAllMeta()
+        stack.clear()
+        stack.add(Scr.Home)
+        touch()
+        saveNow()
+        return true
     }
 
     /** 撤销上一次「从文件恢复 / 从云端恢复」。 */
-    fun undoImport(): Boolean {
-        val snap = store.snapshot() ?: return false
-        return try {
-            val s = parseState(JSONObject(snap.second))
-            if (s.libraries.isEmpty()) return false
-            state = s
-            ensureAllMeta()
-            stack.clear()
-            stack.add(Scr.Home)
-            touch()
-            saveNow()
-            store.clearSnapshot()
-            snapshotAt = null
-            true
-        } catch (_: Exception) {
-            false
-        }
+    suspend fun undoImport(): Boolean {
+        val snap = withContext(Dispatchers.IO) { store.snapshot() } ?: return false
+        val s = withContext(Dispatchers.IO) {
+            try {
+                parseState(JSONObject(snap.second))
+            } catch (_: Exception) {
+                null
+            }
+        } ?: return false
+        if (s.libraries.isEmpty()) return false
+        state = s
+        ensureAllMeta()
+        stack.clear()
+        stack.add(Scr.Home)
+        touch()
+        saveNow()
+        withContext(Dispatchers.IO) { store.clearSnapshot() }
+        snapshotAt = null
+        return true
     }
 
     fun clearSnapshot() {
@@ -749,7 +828,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         busy = true
         cloudStatus = "正在上传…"
         viewModelScope.launch {
-            val r = Cloud.upload(bk, exportText())
+            val json = withContext(Dispatchers.IO) { exportText() }
+            val r = Cloud.upload(bk, json)
             busy = false
             cloudStatus = r.message + " · " + SimpleDateFormat("HH:mm", Locale.CHINA).format(Date())
             if (r.ok) {

@@ -851,7 +851,7 @@ data class CustomerGroup(
 )
 
 /** 按电话或姓名聚合客户记录。query 非空时只保留组内任一记录命中搜索的组。overdueFirst=true 时超期客户排最前。 */
-fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: Boolean = true): List<CustomerGroup> {
+fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: Boolean = true, sortKey: String = "last_desc"): List<CustomerGroup> {
     val pf = phoneFieldOf(lib)
     val nf = nameFieldOf(lib)
     val mf = moneyFieldOf(lib)
@@ -893,12 +893,27 @@ fun customerGroups(lib: MLibrary, by: String, query: String = "", overdueFirst: 
                 last, months, last != null && months > reviewMonths(lastUse))
         )
     }
-    return if (overdueFirst) {
-        out.sortedWith(
-            compareByDescending<CustomerGroup> { it.overdue }.thenByDescending { it.lastDate ?: 0L }
+    val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
+    val base = when (sortKey) {
+        "total_desc" -> out.sortedWith(
+            compareByDescending<CustomerGroup> { it.total }.thenByDescending { it.lastDate ?: 0L }
         )
+        "count_desc" -> out.sortedWith(
+            compareByDescending<CustomerGroup> { it.count }.thenByDescending { it.lastDate ?: 0L }
+        )
+        "avg_desc" -> out.sortedWith(
+            compareByDescending<CustomerGroup> { it.total / it.count.coerceAtLeast(1) }
+                .thenByDescending { it.lastDate ?: 0L }
+        )
+        "name_asc" -> out.sortedWith { a, b -> collator.compare(a.display, b.display) }
+        "name_desc" -> out.sortedWith { a, b -> collator.compare(b.display, a.display) }
+        else -> out.sortedWith(compareByDescending<CustomerGroup> { it.lastDate ?: 0L })
+    }
+    // 稳定排序：超期置顶时保留上面选定的排序作为组内次序
+    return if (overdueFirst) {
+        base.sortedByDescending { if (it.overdue) 1 else 0 }
     } else {
-        out.sortedWith(compareByDescending<CustomerGroup> { it.lastDate ?: 0L })
+        base
     }
 }
 
@@ -1020,4 +1035,24 @@ fun pickStockViews(state: MState, lib: MLibrary, entry: MEntry): List<PickStockV
         out.add(PickStockView(f.name, model, spec, ref.qty, stock, ref.libId, ref.entryId, sku != null))
     }
     return out
+}
+
+/** 轻量统计：按电话分组，最近配镜日期已超用途周期的客户数。比 customerGroups 再 count 省一次完整分组+排序。 */
+fun overduePhoneCount(lib: MLibrary): Int {
+    val pf = phoneFieldOf(lib) ?: return 0
+    val uf = useFieldOf(lib)
+    val now = System.currentTimeMillis()
+    val dayMs = 1000L * 60 * 60 * 24
+    val latest = LinkedHashMap<String, Pair<Long, String>>()
+    lib.entries.forEach { e ->
+        val phone = pf.let { e.values[it.id]?.let { v -> normPhone(v) } }.orEmpty()
+        if (phone.isEmpty()) return@forEach
+        val last = entryDate(lib, e)
+        val prev = latest[phone]
+        if (prev == null || last > prev.first) latest[phone] = last to (uf?.let { e.values[it.id] } ?: "")
+    }
+    return latest.values.count { (last, use) ->
+        val months = ((now - last) / (dayMs * 30)).toInt()
+        months > reviewMonths(use)
+    }
 }

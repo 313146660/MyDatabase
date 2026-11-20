@@ -148,18 +148,29 @@ fun SettingsScreen(vm: AppViewModel) {
 fun BackupScreen(vm: AppViewModel) {
     val rev = vm.rev
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var busyLocal by remember { mutableStateOf(false) }
+    // 备份体积 = 整库序列化，放到 IO 线程计算，避免组合阶段阻塞主线程
+    var sizeText by remember { mutableStateOf("—") }
+    LaunchedEffect(rev) {
+        sizeText = withContext(Dispatchers.IO) { vm.backupSizeText() }
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
-            try {
-                ctx.contentResolver.openOutputStream(uri)?.use { it.write(vm.exportText().toByteArray(Charsets.UTF_8)) }
-                vm.markLocalExport()
-                vm.toast("已导出备份")
-            } catch (e: Exception) {
-                vm.toast("导出失败：" + (e.message ?: "无法写入"))
+            scope.launch {
+                try {
+                    val text = withContext(Dispatchers.IO) { vm.exportText() }
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                    }
+                    vm.markLocalExport()
+                    vm.toast("已导出备份")
+                } catch (e: Exception) {
+                    vm.toast("导出失败：" + (e.message ?: "无法写入"))
+                }
             }
         }
     }
@@ -167,15 +178,19 @@ fun BackupScreen(vm: AppViewModel) {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                if (text != null && vm.importText(text)) {
-                    vm.toast("恢复成功")
-                } else {
-                    vm.toast("文件格式不正确，无法恢复")
+            scope.launch {
+                try {
+                    val text = withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    }
+                    if (text != null && vm.importText(text)) {
+                        vm.toast("恢复成功")
+                    } else {
+                        vm.toast("文件格式不正确，无法恢复")
+                    }
+                } catch (e: Exception) {
+                    vm.toast("读取失败：" + (e.message ?: "无法读取"))
                 }
-            } catch (e: Exception) {
-                vm.toast("读取失败：" + (e.message ?: "无法读取"))
             }
         }
     }
@@ -193,7 +208,7 @@ fun BackupScreen(vm: AppViewModel) {
             MCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("本地文件", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextMain)
-                    Text("${vm.backupSizeText()} · 上次导出：${stampOrNever(vm.bk.lastLocalAt)}", fontSize = 10.5.sp, color = Muted2)
+                    Text("$sizeText · 上次导出：${stampOrNever(vm.bk.lastLocalAt)}", fontSize = 10.5.sp, color = Muted2)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.weight(1f)) {
@@ -221,8 +236,10 @@ fun BackupScreen(vm: AppViewModel) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(Modifier.weight(1f)) {
                                 PillButton("撤销上次恢复", onClick = {
-                                    if (vm.undoImport()) vm.toast("已恢复到导入前的数据")
-                                    else vm.toast("快照不可用")
+                                    scope.launch {
+                                        if (vm.undoImport()) vm.toast("已恢复到导入前的数据")
+                                        else vm.toast("快照不可用")
+                                    }
                                 }, color = Amber)
                             }
                             Box(Modifier.weight(1f)) {
@@ -312,38 +329,47 @@ fun BackupScreen(vm: AppViewModel) {
 fun CsvScreen(vm: AppViewModel, libId: String) {
     val lib = vm.lib(libId) ?: return
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var mode by remember { mutableStateOf("append") }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
         if (uri != null) {
-            try {
-                val text = vm.csvExportText(lib.id) ?: return@rememberLauncherForActivityResult
-                ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-                vm.toast("已导出 ${lib.entries.size} 条记录")
-            } catch (e: Exception) {
-                vm.toast("导出失败：" + (e.message ?: ""))
+            scope.launch {
+                try {
+                    val text = withContext(Dispatchers.IO) { vm.csvExportText(lib.id) } ?: return@launch
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                    }
+                    vm.toast("已导出 ${lib.entries.size} 条记录")
+                } catch (e: Exception) {
+                    vm.toast("导出失败：" + (e.message ?: ""))
+                }
             }
         }
     }
     var pendingText by remember { mutableStateOf<String?>(null) }
     var preview by remember { mutableStateOf<Csv.ImportPreview?>(null) }
     var importing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                if (text == null) {
-                    vm.toast("读取失败")
-                } else {
-                    pendingText = text
-                    preview = Csv.preview(lib, text)
+            scope.launch {
+                try {
+                    val text = withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    }
+                    if (text == null) {
+                        vm.toast("读取失败")
+                    } else {
+                        val p = withContext(Dispatchers.IO) { Csv.preview(lib, text) }
+                        pendingText = text
+                        preview = p
+                    }
+                } catch (e: Exception) {
+                    vm.toast("读取失败：" + (e.message ?: ""))
                 }
-            } catch (e: Exception) {
-                vm.toast("读取失败：" + (e.message ?: ""))
             }
         }
     }

@@ -36,6 +36,7 @@ import kotlin.math.abs
 fun DetailScreen(vm: AppViewModel, libId: String, entryId: String) {
     val rev = vm.rev
     val lib = vm.lib(libId)
+    val dataKey = lib?.let { it.entries.size * 31L + (it.entries.maxOfOrNull { e -> e.updatedAt } ?: 0L) } ?: 0L
     val entry = lib?.entries?.firstOrNull { it.id == entryId }
     if (lib == null || entry == null) {
         Column(Modifier.fillMaxSize().background(Bg)) {
@@ -54,9 +55,9 @@ fun DetailScreen(vm: AppViewModel, libId: String, entryId: String) {
         val cyl = cylValueOf(entry, cfg)
         "球镜 ${fmtPower(sph)}" + if (cyl != 0.0) " · 柱镜 ${fmtPower(cyl)}" else " · 单光"
     } else subtitleOf(lib, entry)
-    val history = historyOf(lib, entry)
-    val family = familyGroup(lib, entry)
-    val related = relatedFor(vm.state, lib, entry)
+    val history = remember(lib.id, entry.id, dataKey) { historyOf(lib, entry) }
+    val family = remember(lib.id, entry.id, dataKey) { familyGroup(lib, entry) }
+    val related = remember(rev, entry.id) { relatedFor(vm.state, lib, entry) }
     val picks = remember(rev, entry.id) { pickStockViews(vm.state, lib, entry) }
     val clipboard = LocalClipboardManager.current
     val phoneVal = phoneFieldOf(lib)?.let { oneLine(entry.values[it.id]) }.orEmpty()

@@ -22,6 +22,11 @@ class Store(context: Context) {
         prefs.edit().putString(KEY_STATE, state.toJson().toString()).apply()
     }
 
+    /** 已序列化好的 JSON 字符串（供调用方在后台线程生成后写入）。 */
+    fun commitJson(json: String) {
+        prefs.edit().putString(KEY_STATE, json).apply()
+    }
+
     fun rawJson(): String? = prefs.getString(KEY_STATE, null)
 
     fun getBk(): JSONObject {

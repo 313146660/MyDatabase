@@ -45,8 +45,8 @@ private fun moneyStr(v: Double): String =
 @Composable
 fun StatsScreen(vm: AppViewModel, libId: String) {
     val lib = vm.state.libraries.firstOrNull { it.id == libId }
-    val rev = vm.rev
-    val stats = remember(libId, rev) { lib?.let { customerStats(it) } }
+    val dataKey = lib?.let { it.entries.size * 31L + (it.entries.maxOfOrNull { e -> e.updatedAt } ?: 0L) } ?: 0L
+    val stats = remember(libId, dataKey) { lib?.let { customerStats(it) } }
     val color = if (lib != null) hexColor(lib.color) else Primary
 
     Column(Modifier.fillMaxSize().background(Bg)) {
@@ -58,7 +58,7 @@ fun StatsScreen(vm: AppViewModel, libId: String) {
             return@Column
         }
         LazyColumn(Modifier.fillMaxSize()) {
-            item { OverviewGrid(stats) }
+            item { OverviewGrid(stats!!) }
             item { SectionHead("近 12 个月营收") }
             item { RevenueChart(stats.monthlyRevenue, color) }
             item { SectionHead("热销镜片 Top 10") }

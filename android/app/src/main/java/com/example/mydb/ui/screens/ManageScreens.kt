@@ -454,7 +454,7 @@ fun FieldFormScreen(vm: AppViewModel, libId: String, fieldId: String?) {
 fun ListFieldsScreen(vm: AppViewModel, libId: String) {
     val rev = vm.rev
     val lib = vm.lib(libId) ?: return
-    var selected by remember(libId, rev) { mutableStateOf(listFieldsOf(lib).map { it.id }) }
+    var selected by remember(libId) { mutableStateOf(listFieldsOf(lib).map { it.id }) }
     val on = selected.mapNotNull { id -> lib.fields.firstOrNull { it.id == id } }
     val off = lib.fields.filter { it.id !in selected }
 
@@ -543,7 +543,7 @@ fun AlertsScreen(vm: AppViewModel, libId: String) {
     val rev = vm.rev
     val lib = vm.lib(libId) ?: return
     val al = alertsOf(lib) ?: return
-    var def by remember(libId, rev) { mutableStateOf(al.defaultThreshold.toString()) }
+    var def by remember(libId) { mutableStateOf(al.defaultThreshold.toString()) }
     val items = lowStockOf(lib)
     Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState())) {
         TopBar("库存提醒", lib.name, onBack = { vm.back() })

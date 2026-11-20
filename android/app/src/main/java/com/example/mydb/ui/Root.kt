@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -24,6 +25,10 @@ import com.example.mydb.ui.theme.*
 
 @Composable
 fun AppRoot(vm: AppViewModel) {
+    if (vm.booting) {
+        BootScreen()
+        return
+    }
     val stack = vm.stack
     val current = stack.lastOrNull() ?: Scr.Home
     val showTabs = current is Scr.Home || current is Scr.Settings
@@ -91,5 +96,17 @@ private fun TabItem(icon: String, label: String, active: Boolean, onClick: () ->
         AppIcon(icon, 21.dp, if (active) Primary else Muted2)
         Spacer(Modifier.height(2.dp))
         Text(label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium, color = if (active) Primary else Muted2)
+    }
+}
+
+/** 冷启动加载页：整库 JSON 在后台解析期间展示。 */
+@Composable
+private fun BootScreen() {
+    Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(Modifier.size(26.dp), color = Primary, strokeWidth = 2.5.dp)
+            Spacer(Modifier.height(14.dp))
+            Text("正在读取数据…", fontSize = 12.5.sp, color = Muted2)
+        }
     }
 }

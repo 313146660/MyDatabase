@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,20 +36,24 @@ fun HomeScreen(vm: AppViewModel) {
     var query by rememberSaveable { mutableStateOf("") }
     val q = query.trim().lowercase()
     val libs = vm.state.libraries
-    val totalEntries = libs.sumOf { it.entries.size }
-    val totalFields = libs.sumOf { it.fields.size }
-    val lows = lowStockAll(vm.state)
-    val lowCount = lows.sumOf { it.second.size }
-    val zeroCount = lows.sumOf { it.second.count { item -> item.qty <= 0 } }
+    val totalEntries = remember(rev) { libs.sumOf { it.entries.size } }
+    val totalFields = remember(rev) { libs.sumOf { it.fields.size } }
+    val lows = remember(rev) { lowStockAll(vm.state) }
+    val lowCount = remember(lows) { lows.sumOf { it.second.size } }
+    val zeroCount = remember(lows) { lows.sumOf { it.second.count { item -> item.qty <= 0 } } }
 
-    val recent = libs.flatMap { l -> l.entries.map { l to it } }
-        .sortedByDescending { it.second.updatedAt }
-        .take(8)
+    val recent = remember(rev) {
+        libs.flatMap { l -> l.entries.map { l to it } }
+            .sortedByDescending { it.second.updatedAt }
+            .take(8)
+    }
 
     val filteredLibs = if (q.isEmpty()) libs else libs.filter { it.name.lowercase().contains(q) }
-    val filteredRecent = if (q.isEmpty()) recent else libs.flatMap { l ->
-        l.entries.filter { entryMatches(l, it, q) }.map { l to it }
-    }.sortedByDescending { it.second.updatedAt }.take(30)
+    val filteredRecent = remember(q, rev) {
+        if (q.isEmpty()) recent else libs.flatMap { l ->
+            l.entries.filter { entryMatches(l, it, q) }.map { l to it }
+        }.sortedByDescending { it.second.updatedAt }.take(30)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(Bg),

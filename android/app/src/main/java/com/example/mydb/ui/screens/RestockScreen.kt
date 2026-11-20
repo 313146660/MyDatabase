@@ -42,6 +42,9 @@ import androidx.compose.ui.unit.sp
 import com.example.mydb.data.*
 import com.example.mydb.ui.*
 import com.example.mydb.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,16 +58,18 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
         EmptyBlock("database", "数据库不存在", "它可能已经被删除")
         return
     }
+    val dataKey = lib.entries.size * 31L + (lib.entries.maxOfOrNull { it.updatedAt } ?: 0L)
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val items = remember(lib.id, rev) { restockItems(lib) }
+    val scope = rememberCoroutineScope()
+    val items = remember(lib.id, dataKey) { restockItems(lib) }
     val grouped = remember(items) { items.groupBy { it.model } }
     val unit = lib.fields.firstOrNull { it.name.contains("库存") }?.unit ?: "片"
-    val cfg = remember(lib.id, rev) { restockCfgOf(lib) }
+    val cfg = remember(lib.id, dataKey) { restockCfgOf(lib) }
 
     var textOpen by rememberSaveable(lib.id) { mutableStateOf(false) }
-    val txt = remember(lib.id, rev) { restockText(lib) }
-    val bySupplier = remember(lib.id, rev) { restockTextBySupplier(lib) }
+    val txt = remember(lib.id, dataKey) { restockText(lib) }
+    val bySupplier = remember(lib.id, dataKey) { restockTextBySupplier(lib) }
     var groupBySupplier by rememberSaveable(lib.id) { mutableStateOf(false) }
     val supplierJoined = remember(bySupplier) {
         if (bySupplier.size <= 1) ""
@@ -79,14 +84,19 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
         if (uri != null) {
-            try {
-                ctx.contentResolver.openOutputStream(uri)?.use {
-                    it.write(("\uFEFF" + displayTxt).toByteArray(Charsets.UTF_8))
+            // 文本编码与写盘放到 IO 线程，主线程只负责提示与记录补货历史
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use {
+                            it.write(("\uFEFF" + displayTxt).toByteArray(Charsets.UTF_8))
+                        }
+                    }
+                    vm.addRestockHistory(lib.id, displayTxt, items.sumOf { it.restock }, items.size, items)
+                    vm.toast("已保存补货文本")
+                } catch (e: Exception) {
+                    vm.toast("保存失败：" + (e.message ?: ""))
                 }
-                vm.addRestockHistory(lib.id, displayTxt, items.sumOf { it.restock }, items.size, items)
-                vm.toast("已保存补货文本")
-            } catch (e: Exception) {
-                vm.toast("保存失败：" + (e.message ?: ""))
             }
         }
     }
@@ -277,27 +287,29 @@ fun RestockConfigScreen(vm: AppViewModel, libId: String) {
         EmptyBlock("database", "数据库不存在", "它可能已经被删除")
         return
     }
-    val cfg = remember(lib.id, rev) { restockCfgOf(lib) }
-    val models = remember(lib.id, rev) { modelsOf(lib) }
+    val dataKey = lib.entries.size * 31L + (lib.entries.maxOfOrNull { it.updatedAt } ?: 0L)
+    val cfg = remember(lib.id, dataKey) { restockCfgOf(lib) }
+    val models = remember(lib.id, dataKey) { modelsOf(lib) }
 
-    var defPlain by remember(lib.id, rev) { mutableStateOf(cfg.defaultPlain.toString()) }
-    var defCyl by remember(lib.id, rev) { mutableStateOf(cfg.defaultCyl.toString()) }
-    val plainInputs = remember(lib.id, rev) {
+    // UI 输入状态：key 只用 lib.id，entries 变化不重置用户输入
+    var defPlain by remember(lib.id) { mutableStateOf(cfg.defaultPlain.toString()) }
+    var defCyl by remember(lib.id) { mutableStateOf(cfg.defaultCyl.toString()) }
+    val plainInputs = remember(lib.id) {
         mutableStateMapOf<String, String>().apply {
             models.forEach { put(it, cfg.targets[it]?.plain?.toString() ?: "") }
         }
     }
-    val cylInputs = remember(lib.id, rev) {
+    val cylInputs = remember(lib.id) {
         mutableStateMapOf<String, String>().apply {
             models.forEach { put(it, cfg.targets[it]?.cyl?.toString() ?: "") }
         }
     }
-    val supplierInputs = remember(lib.id, rev) {
+    val supplierInputs = remember(lib.id) {
         mutableStateMapOf<String, String>().apply {
             models.forEach { put(it, cfg.suppliers[it] ?: "") }
         }
     }
-    val rangeEdits = remember(lib.id, rev) {
+    val rangeEdits = remember(lib.id) {
         mutableStateMapOf<String, RestockRangeRule>().apply {
             cfg.ranges.forEach { put(it.id, it) }
         }
@@ -460,7 +472,7 @@ fun RestockHistoryScreen(vm: AppViewModel, libId: String) {
     val rev = vm.rev
     val lib = vm.lib(libId)
     val all = vm.restockHistory
-    val records = remember(all, libId, rev) { all.filter { it.libId == libId } }
+    val records = remember(all, libId) { all.filter { it.libId == libId } }
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
 

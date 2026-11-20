@@ -38,6 +38,7 @@ import com.example.mydb.ui.*
 import com.example.mydb.ui.theme.*
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 @Composable
 fun LibraryScreen(vm: AppViewModel, libId: String) {
@@ -102,7 +103,7 @@ fun LibraryScreen(vm: AppViewModel, libId: String) {
         if (matrixMode) {
             MatrixContent(vm, lib)
         } else {
-            ListContent(vm, lib, query, { query = it }, filter, { filter = it }, limit, { limit += 120 }, rev)
+            ListContent(vm, lib, query, { query = it }, filter, { filter = it }, limit, { limit += 120 })
         }
         } // Column
 
@@ -141,14 +142,15 @@ private fun ListContent(
     filter: String,
     onFilter: (String) -> Unit,
     limit: Int,
-    onMore: () -> Unit,
-    rev: Int
+    onMore: () -> Unit
 ) {
     val color = hexColor(lib.color)
     val phoneField = phoneFieldOf(lib)
     val nameField = nameFieldOf(lib)
+    val dataKey = lib.entries.size * 31L + (lib.entries.maxOfOrNull { it.updatedAt } ?: 0L)
 
-    val phoneNames = remember(lib.id, rev) {
+    // 首次同步计算（首帧秒出完整数据），之后 dataKey 不变则 remember cache 命中
+    val phoneNames = remember(lib.id, dataKey) {
         val map = HashMap<String, MutableSet<String>>()
         if (phoneField != null && nameField != null) {
             lib.entries.forEach { e ->
@@ -165,8 +167,8 @@ private fun ListContent(
         val set = phoneNames[normPhone(e.values[phoneField.id])]
         return set != null && set.size > 1
     }
-    val familyCount = remember(lib.id, rev) { lib.entries.count { isFamily(it) } }
-    val favCount = lib.entries.count { it.favorite }
+    val familyCount = remember(lib.id, dataKey) { lib.entries.count { isFamily(it) } }
+    val favCount = remember(lib.id, dataKey) { lib.entries.count { it.favorite } }
 
     val sort = lib.sort ?: "visit_desc"
     val sortOptions = listOf(
@@ -176,23 +178,57 @@ private fun ListContent(
         "name_asc" to "名称 A→Z",
         "name_desc" to "名称 Z→A"
     )
-    val sortLabel = sortOptions.firstOrNull { it.first == sort }?.second ?: "最近验光"
+    // 搜索防抖：输入框即时响应，列表筛选等打字停顿 160ms 后再执行，避免每次按键全量扫描
+    var filtQuery by remember { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (query != filtQuery) delay(160)
+        filtQuery = query
+    }
+
     val collator = remember { java.text.Collator.getInstance(java.util.Locale.CHINA) }
-    val filtered = lib.entries.filter { entryMatches(lib, it, query) }
-        .let { list -> if (filter == "fav") list.filter { it.favorite } else if (filter == "family") list.filter { isFamily(it) } else list }
-    val all = when (sort) {
-        "updated_desc" -> filtered.sortedByDescending { it.updatedAt }
-        "visit_asc" -> filtered.sortedWith(compareBy<MEntry> { visitDate(lib, it) ?: Long.MAX_VALUE }.thenByDescending { it.updatedAt })
-        "name_asc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, a), titleOf(lib, b)) }
-        "name_desc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, b), titleOf(lib, a)) }
-        else -> filtered.sortedWith(compareByDescending<MEntry> { visitDate(lib, it) ?: 0L }.thenByDescending { it.updatedAt })
+    val all = remember(lib.id, sort, filtQuery, filter, dataKey) {
+        val filtered = lib.entries.filter { entryMatches(lib, it, filtQuery) }
+            .let { list ->
+                if (filter == "fav") list.filter { it.favorite }
+                else if (filter == "family") list.filter { isFamily(it) }
+                else list
+            }
+        when (sort) {
+            "updated_desc" -> filtered.sortedByDescending { it.updatedAt }
+            "visit_asc" -> filtered.sortedWith(compareBy<MEntry> { visitDate(lib, it) ?: Long.MAX_VALUE }.thenByDescending { it.updatedAt })
+            "name_asc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, a), titleOf(lib, b)) }
+            "name_desc" -> filtered.sortedWith { a, b -> collator.compare(titleOf(lib, b), titleOf(lib, a)) }
+            else -> filtered.sortedWith(compareByDescending<MEntry> { visitDate(lib, it) ?: 0L }.thenByDescending { it.updatedAt })
+        }
     }
     val history = vm.searchHistory[lib.id].orEmpty()
     var sortMenu by remember { mutableStateOf(false) }
-    var custMode by rememberSaveable(lib.id, rev) { mutableStateOf(false) }
-    var custBy by rememberSaveable(lib.id, rev) { mutableStateOf("phone") }
-    var overduePinned by rememberSaveable(lib.id, rev) { mutableStateOf(true) }
-    val overdueCount = remember(lib.id, rev) { customerGroups(lib, "phone").count { it.overdue } }
+    // 客户视图偏好存在 ViewModel 里，离开客户库再进来不会被重置
+    val cv = vm.custViewOf(lib.id)
+    val custMode = cv.mode
+    val custBy = cv.by
+    val overduePinned = cv.pinned
+    val custSortOptions = listOf(
+        "last_desc" to "最近配镜",
+        "avg_desc" to "客单价",
+        "total_desc" to "累计消费",
+        "count_desc" to "配镜次数",
+        "name_asc" to "姓名 A→Z",
+        "name_desc" to "姓名 Z→A"
+    )
+    val activeSortOptions = if (custMode) custSortOptions else sortOptions
+    val activeSortKey = if (custMode) cv.sort else sort
+    val sortLabel = activeSortOptions.firstOrNull { it.first == activeSortKey }?.second
+        ?: activeSortOptions.first().second
+    val overdueCount = remember(lib.id, dataKey) { overduePhoneCount(lib) }
+    val customerGroupsFiltered = remember(lib.id, custBy, filtQuery, overduePinned, cv.sort, dataKey, filter) {
+        val raw = customerGroups(lib, custBy, filtQuery, overduePinned, cv.sort)
+        when (filter) {
+            "fav" -> raw.filter { g -> g.entries.any { it.favorite } }
+            "family" -> raw.filter { it.names.size > 1 }
+            else -> raw
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item {
@@ -208,16 +244,58 @@ private fun ListContent(
                         contentAlignment = Alignment.Center
                     ) { AppIcon(lib.icon, 21.dp, Color.White) }
                     Spacer(Modifier.width(11.dp))
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text(lib.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text("${lib.entries.size} 条记录，最近一次 ${latestStamp(lib)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.82f))
                     }
+                    Row(
+                        Modifier.clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.22f))
+                            .clickable { vm.go(Scr.Stats(lib.id)) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AppIcon("chart", 13.dp, Color.White.copy(alpha = 0.9f))
+                        Spacer(Modifier.width(4.dp))
+                        Text("统计", fontSize = 11.sp, color = Color.White.copy(alpha = 0.92f), fontWeight = FontWeight.SemiBold)
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
-                Row {
-                    Pill("${lib.fields.size} 个字段")
-                    Spacer(Modifier.width(8.dp))
-                    Pill("${favCount} 个收藏")
+                // 数据条：记录 / 字段 / 收藏，三等分居中
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    InfoStat("${lib.entries.size}", "条记录", Modifier.weight(1f))
+                    InfoStat("${lib.fields.size}", "个字段", Modifier.weight(1f))
+                    InfoStat("$favCount", "个收藏", Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(8.dp))
+                // 排序铺满整行；客户模式下与超期提醒各占一半
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        InfoButton("排序 · $sortLabel", "sliders", Modifier.fillMaxWidth()) { sortMenu = true }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            activeSortOptions.forEach { (key, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = {
+                                    sortMenu = false
+                                    if (custMode) vm.updateCustView(lib.id) { it.copy(sort = key) }
+                                    else vm.setSort(lib.id, key)
+                                })
+                            }
+                        }
+                    }
+                    if (custMode && overdueCount > 0) {
+                        Box(Modifier.weight(1f)) {
+                            InfoButton(
+                                "超期 $overdueCount${if (overduePinned) " · 置顶" else ""}",
+                                "bell", Modifier.fillMaxWidth(), inverted = overduePinned
+                            ) { vm.updateCustView(lib.id) { it.copy(pinned = !it.pinned) } }
+                        }
+                    }
                 }
             }
         }
@@ -230,8 +308,8 @@ private fun ListContent(
                     Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SegButton("记录", !custMode, Modifier.width(56.dp)) { custMode = false }
-                    SegButton("客户", custMode, Modifier.width(56.dp)) { custMode = true }
+                    SegButton("记录", !custMode, Modifier.width(56.dp)) { vm.updateCustView(lib.id) { it.copy(mode = false) } }
+                    SegButton("客户", custMode, Modifier.width(56.dp)) { vm.updateCustView(lib.id) { it.copy(mode = true) } }
                 }
                 if (custMode) {
                     Spacer(Modifier.width(8.dp))
@@ -239,32 +317,10 @@ private fun ListContent(
                         Modifier.clip(RoundedCornerShape(14.dp)).background(soft(TextMain)).padding(3.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SegButton("按电话", custBy == "phone", Modifier.width(62.dp)) { custBy = "phone" }
-                        SegButton("按姓名", custBy == "name", Modifier.width(62.dp)) { custBy = "name" }
+                        SegButton("按电话", custBy == "phone", Modifier.width(62.dp)) { vm.updateCustView(lib.id) { it.copy(by = "phone") } }
+                        SegButton("按姓名", custBy == "name", Modifier.width(62.dp)) { vm.updateCustView(lib.id) { it.copy(by = "name") } }
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                if (overdueCount > 0) {
-                    Row(
-                        Modifier.clip(RoundedCornerShape(10.dp))
-                            .background(if (overduePinned) Danger else soft(TextMain))
-                            .clickable { overduePinned = !overduePinned }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            "超期 $overdueCount${if (overduePinned) " · 置顶" else ""}",
-                            fontSize = 10.5.sp,
-                            color = if (overduePinned) Color.White else Danger,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    "统计", fontSize = 11.5.sp, color = Primary, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(soft(TextMain))
-                        .clickable { vm.go(Scr.Stats(lib.id)) }.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
             }
         }
         item {
@@ -303,17 +359,6 @@ private fun ListContent(
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box {
-                    TagChip("排序 · $sortLabel", true, "sliders") { sortMenu = true }
-                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                        sortOptions.forEach { (key, label) ->
-                            DropdownMenuItem(text = { Text(label) }, onClick = {
-                                sortMenu = false
-                                vm.setSort(lib.id, key)
-                            })
-                        }
-                    }
-                }
                 TagChip("全部 ${lib.entries.size}", filter == "all") { onFilter("all") }
                 TagChip("收藏 $favCount", filter == "fav") { onFilter("fav") }
                 if (familyCount > 0) TagChip("家庭 $familyCount", filter == "family", icon = "users") { onFilter("family") }
@@ -322,13 +367,7 @@ private fun ListContent(
         item { Spacer(Modifier.height(6.dp)) }
 
         if (custMode && phoneField != null) {
-            val groups = customerGroups(lib, custBy, query, overduePinned).let { list ->
-                when (filter) {
-                    "fav" -> list.filter { g -> g.entries.any { it.favorite } }
-                    "family" -> list.filter { it.names.size > 1 }
-                    else -> list
-                }
-            }
+            val groups = customerGroupsFiltered
             if (groups.isEmpty()) {
                 item { EmptyBlock("users", "没有匹配的客户", "试试切换聚合方式或清空搜索") }
             } else {
@@ -377,12 +416,32 @@ private fun ListContent(
 }
 
 @Composable
-private fun Pill(text: String) {
+private fun InfoStat(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text(label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.78f))
+    }
+}
+
+@Composable
+private fun InfoButton(
+    text: String,
+    icon: String,
+    modifier: Modifier = Modifier,
+    inverted: Boolean = false,
+    onClick: () -> Unit
+) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.18f)).padding(horizontal = 10.dp, vertical = 4.dp),
+        modifier.clip(RoundedCornerShape(10.dp))
+            .background(if (inverted) Color.White else Color.White.copy(alpha = 0.22f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text, fontSize = 10.5.sp, color = Color.White, fontWeight = FontWeight.Medium)
+        AppIcon(icon, 13.dp, if (inverted) Danger else Color.White.copy(alpha = 0.9f))
+        Spacer(Modifier.width(4.dp))
+        Text(text, fontSize = 11.sp, color = if (inverted) Danger else Color.White, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -570,7 +629,8 @@ private fun powerAxis(values: Collection<Double>, isCyl: Boolean = false): List<
 @Composable
 private fun MatrixContent(vm: AppViewModel, lib: MLibrary) {
     val rev = vm.rev
-    val data = matrixData(lib) ?: return
+    val dataKey = lib.entries.size * 31L + (lib.entries.maxOfOrNull { it.updatedAt } ?: 0L)
+    val data = remember(lib.id, dataKey) { matrixData(lib) } ?: return
     val names = data.models.keys.toList()
     if (names.isEmpty()) {
         EmptyBlock("box", "还没有库存数据", "用 CSV 导入，或新增一条记录")
@@ -582,8 +642,8 @@ private fun MatrixContent(vm: AppViewModel, lib: MLibrary) {
     val range = lib.matrix?.ranges?.get(model)
     val sphs = if (range != null && range.sph.isNotEmpty()) powerAxis(range.sph.mapNotNull { toPower(it) }) else powerAxis(g.sphs)
     val cyls = if (range != null && range.cyl.isNotEmpty()) powerAxis(range.cyl.mapNotNull { toPower(it) }, true) else powerAxis(g.cyls, true)
-    val al = alertsOf(lib)
-    val lows = lowStockOf(lib)
+    val al = remember(lib.id, dataKey) { alertsOf(lib) }
+    val lows = remember(lib.id, dataKey) { lowStockOf(lib) }
     val totals = remember(lib.id, rev) { data.models.mapValues { it.value.cells.values.sum() } }
     val modelLows = remember(lib.id, rev) {
         val m = HashMap<String, Int>()
