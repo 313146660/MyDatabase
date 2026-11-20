@@ -357,6 +357,7 @@
   function applyBackup(payload) {
     const data = payload && payload.data && Array.isArray(payload.data.libraries) ? payload.data : payload;
     if (!data || !Array.isArray(data.libraries)) throw new Error('invalid');
+    takeSnap();
     state = { libraries: data.libraries, links: data.links || [], reminders: data.reminders || [] };
     ensureLibMeta();
     ensurePickFields();
@@ -365,6 +366,88 @@
     ui.route = { name: 'home' };
     ui.tab = 'home';
     render();
+  }
+
+  /* ---------------- 搜索历史（按库保存） ---------------- */
+  const HIST_KEY = 'memento_searchhist';
+  let searchHist = (() => {
+    try {
+      const raw = localStorage.getItem(HIST_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch (e) { return {}; }
+  })();
+
+  const histOf = (libId) => (Array.isArray(searchHist[libId]) ? searchHist[libId] : []);
+
+  function saveHist() {
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(searchHist)); } catch (e) { /* ignore */ }
+  }
+
+  function pushSearch(libId, raw) {
+    const q = String(raw || '').trim();
+    if (!q) return;
+    const list = [q, ...histOf(libId).filter((x) => x !== q)].slice(0, 8);
+    if (JSON.stringify(histOf(libId)) === JSON.stringify(list)) return;
+    searchHist[libId] = list;
+    saveHist();
+  }
+
+  function clearSearch(libId) {
+    if (!searchHist[libId]) return;
+    delete searchHist[libId];
+    saveHist();
+    render();
+    toast('已清空搜索历史');
+  }
+
+  /* ---------------- 恢复前快照 ---------------- */
+  const SNAP_KEY = 'memento_snapshot';
+
+  function readSnap() {
+    try {
+      const raw = localStorage.getItem(SNAP_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      return obj && obj.data && Array.isArray(obj.data.libraries) ? obj : null;
+    } catch (e) { return null; }
+  }
+
+  const hasSnap = () => !!readSnap();
+
+  function snapTime() {
+    const s = readSnap();
+    if (!s || !s.at) return '';
+    const d = new Date(s.at);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function takeSnap() {
+    try {
+      localStorage.setItem(SNAP_KEY, JSON.stringify({ at: Date.now(), data: state }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function dropSnap() {
+    try { localStorage.removeItem(SNAP_KEY); } catch (e) { /* ignore */ }
+    render();
+    toast('已丢弃快照');
+  }
+
+  function undoRestore() {
+    const snap = readSnap();
+    if (!snap) { toast('快照不可用'); return; }
+    state = snap.data;
+    try { localStorage.removeItem(SNAP_KEY); } catch (e) { /* ignore */ }
+    ensureLibMeta();
+    ensurePickFields();
+    save();
+    ui.stack = [];
+    ui.route = { name: 'settings' };
+    ui.tab = 'settings';
+    render();
+    toast('已撤销上次恢复');
   }
 
   /* ---------------- ui state ---------------- */
@@ -708,6 +791,7 @@
     let html = '';
     switch (ui.route.name) {
       case 'lib': html = libView(); break;
+      case 'restock': html = restockView(); break;
       case 'entry': html = entryView(); break;
       case 'settings': html = settingsView(); break;
       default: html = homeView();
@@ -764,7 +848,7 @@
         <section class="home-hero">
           <div class="hero-row">
             <div>
-              <div class="hero-kicker">MEMENTO</div>
+              <div class="hero-kicker">MYDATABASE</div>
               <div class="hero-title">我的数据库</div>
               <div class="hero-date">${dateStr()}</div>
             </div>
@@ -930,6 +1014,9 @@
           ` : ''}
           ${mode === 'matrix' ? `<button class="chip" data-act="add-entry">${icon('plus', 11)} 新增规格</button>` : ''}
           ${mode === 'matrix' ? `<button class="chip" data-act="alerts">${icon('bell', 11)} 提醒${lowStockOf(lib).length ? ' ' + lowStockOf(lib).length : ''}</button>` : ''}
+          ${mx ? `<button class="chip" data-act="restock">${icon('box', 11)} 补货清单</button>` : ''}
+          ${mx ? `<button class="chip" data-act="batch">${icon('sliders', 11)} 批量</button>` : ''}
+          ${batchUndo && batchUndo.libId === lib.id ? `<button class="chip undo" data-act="batch-undo">${icon('refresh', 11)} 撤销</button>` : ''}
           <button class="chip" data-act="fields">${icon('layers', 11)} 字段 ${lib.fields.length}</button>
           <button class="chip" data-act="list-fields">${icon('sliders', 11)} 显示 ${listFieldsOf(lib).length}</button>
           <button class="chip ghost" data-act="library-data">${icon('database', 12)} CSV 导入/导出</button>
@@ -970,6 +1057,14 @@
             <input id="libSearch" placeholder="在「${esc(lib.name)}」中搜索" value="${esc(ui.libSearch)}" autocomplete="off" />
           </div>
         </div>
+        ${!ui.libSearch && histOf(lib.id).length ? `
+        <div class="search-history">
+          <span>搜索历史</span>
+          <button data-act="search-clear" data-id="${lib.id}">清空</button>
+        </div>
+        <div class="chips sh-chips">
+          ${histOf(lib.id).map((s) => `<button class="chip" data-act="search-use" data-id="${lib.id}" data-q="${esc(s)}">${esc(s)}</button>`).join('')}
+        </div>` : ''}
         ${toolsHTML}
 
         <div class="entry-list" style="--list-fs:${listFontPx(lib)}px">
@@ -1197,6 +1292,277 @@
       </button>
     `;
   }
+  /* ---------------- 补货清单 ---------------- */
+  const rsQty = { plain: 4, cyl: 2 };
+
+  // 按型号分组，单光用 plainQty，带散光用 cylQty
+  function restockText(lib, plainQty, cylQty) {
+    const groups = new Map();
+    lowStockOf(lib).forEach((i) => {
+      if (!groups.has(i.model)) groups.set(i.model, []);
+      groups.get(i.model).push(i);
+    });
+    const lines = [];
+    groups.forEach((list, model) => {
+      if (lines.length) lines.push('');
+      lines.push(model);
+      list.slice()
+        .sort((a, b) => a.sph - b.sph || a.cyl - b.cyl)
+        .forEach((i) => {
+          let s = `${fmtPower(i.sph)}ds`;
+          if (i.cyl) s += ` / ${fmtPower(i.cyl)}dc`;
+          s += `，${i.cyl ? cylQty : plainQty}`;
+          lines.push(s);
+        });
+    });
+    return lines.join('\r\n');
+  }
+
+  function restockUnit(lib) {
+    const al = alertsOf(lib);
+    return (al && al.field && al.field.unit) || '片';
+  }
+
+  function restockView() {
+    const lib = libById(ui.route.id);
+    if (!lib) return emptyHTML('database', '数据库不存在', '它可能已经被删除');
+    const items = lowStockOf(lib);
+    const unit = restockUnit(lib);
+    const groups = new Map();
+    items.forEach((i) => {
+      if (!groups.has(i.model)) groups.set(i.model, []);
+      groups.get(i.model).push(i);
+    });
+
+    const body = items.length ? `
+      <div class="rs-hint">点一行看这条规格的详情；下方可以生成发给供货商的文本。</div>
+      ${[...groups.entries()].map(([model, list]) => {
+        const zero = list.filter((i) => i.qty <= 0).length;
+        return `
+          <div class="rs-group">
+            <b>${esc(model)}</b>
+            <span class="${zero ? 'danger' : ''}">${list.length} 个${zero ? ` · ${zero} 缺货` : ''}</span>
+          </div>
+          ${list.map((i) => `
+            <button class="rs-row" data-act="open-entry" data-lib="${lib.id}" data-id="${i.entry.id}">
+              <span class="rs-sph">${fmtPower(i.sph)}</span>
+              <span class="rs-cyl">${i.cyl ? fmtPower(i.cyl) : '单光'}</span>
+              <span class="rs-qty ${i.qty <= 0 ? 'zero' : ''}">${Math.round(i.qty)} ${esc(unit)}</span>
+              <span class="rs-th">阈值 ${i.th}</span>
+              ${icon('chevron', 15)}
+            </button>`).join('')}
+        `;
+      }).join('')}
+      <div class="rs-foot">
+        <div class="rs-note">补货数量：单光 ${rsQty.plain} ${esc(unit)} · 带散光 ${rsQty.cyl} ${esc(unit)}</div>
+        <button class="btn primary" data-act="restock-text">生成补货文本（可复制）</button>
+      </div>
+    ` : emptyHTML('box', '库存都够用', '没有低于提醒阈值的规格');
+
+    return `
+      <div class="screen">
+        <div class="navbar">
+          <button class="nav-btn" data-act="back" aria-label="返回">${icon('arrowLeft', 20)}</button>
+          <div class="nav-title"><b>补货清单</b><span>${esc(lib.name)} · ${items.length} 个规格低于阈值</span></div>
+          <div class="nav-actions"></div>
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  function restockTextSheet(lib) {
+    const items = lowStockOf(lib);
+    const unit = restockUnit(lib);
+    const root = $('#sheetRoot');
+    root.innerHTML = `
+      <div class="sheet-backdrop" data-act="close-sheet"></div>
+      <div class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-grip"></div>
+        <div class="sheet-head">
+          <h2>补货文本</h2>
+          <p>按型号分组，单光按 ${rsQty.plain} ${esc(unit)}、带散光按 ${rsQty.cyl} ${esc(unit)} 生成，复制后直接发给供货商。</p>
+        </div>
+        <div class="sheet-body">
+          <div class="rs-qty-row">
+            <label>单光数量<input id="rsPlain" type="number" min="0" max="999" value="${rsQty.plain}" /></label>
+            <label>带散光数量<input id="rsCyl" type="number" min="0" max="999" value="${rsQty.cyl}" /></label>
+          </div>
+          <pre class="rs-text" id="rsText">${esc(restockText(lib, rsQty.plain, rsQty.cyl))}</pre>
+        </div>
+        <div class="sheet-actions">
+          <button type="button" class="btn ghost" data-act="restock-save">保存为 txt</button>
+          <button type="button" class="btn primary" data-act="restock-copy">复制全部（${items.length} 个规格）</button>
+        </div>
+      </div>`;
+    root.classList.add('open');
+    sheetOpen = true;
+    const refresh = () => {
+      rsQty.plain = Math.max(0, Math.min(999, parseInt($('#rsPlain').value, 10) || 0));
+      rsQty.cyl = Math.max(0, Math.min(999, parseInt($('#rsCyl').value, 10) || 0));
+      $('#rsText').textContent = restockText(lib, rsQty.plain, rsQty.cyl);
+    };
+    $('#rsPlain').addEventListener('input', refresh);
+    $('#rsCyl').addEventListener('input', refresh);
+  }
+
+  function saveRestockTxt(lib) {
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const name = `${lib.name.replace(/[\\/:*?"<>|]/g, '_')}-补货-${stamp}.txt`;
+    const blob = new Blob(['\uFEFF' + restockText(lib, rsQty.plain, rsQty.cyl)], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    toast('已保存补货文本');
+  }
+
+  /* ---------------- 批量改库存 ---------------- */
+  let batchUndo = null;
+  const batchState = { all: false, model: '', sphMin: '', sphMax: '', cyl: 'all', qty: '' };
+
+  function batchFilterOf(lib) {
+    const cfg = matrixConfig(lib);
+    if (!cfg) return null;
+    const lo = toPower(batchState.sphMin);
+    const hi = toPower(batchState.sphMax);
+    const both = lo !== null && hi !== null;
+    return {
+      cfg,
+      model: batchState.all ? null : batchState.model,
+      min: both ? Math.min(lo, hi) : lo,
+      max: both ? Math.max(lo, hi) : hi,
+      cyl: batchState.cyl
+    };
+  }
+
+  function batchEntries(lib, f) {
+    if (!f) return [];
+    return lib.entries.filter((e) => {
+      const model = String(e.values[f.cfg.group.id] || '').trim();
+      if (!model) return false;
+      if (f.model && model !== f.model) return false;
+      const sph = toPower(e.values[f.cfg.row.id]);
+      const cyl = cylValueOf(f.cfg, e);
+      if (sph === null || cyl === null) return false;
+      if (f.min !== null && sph < f.min - 1e-9) return false;
+      if (f.max !== null && sph > f.max + 1e-9) return false;
+      if (f.cyl === 'none' && cyl !== 0) return false;
+      if (f.cyl === 'has' && cyl === 0) return false;
+      return true;
+    });
+  }
+
+  function batchSheet(lib) {
+    const cfg = matrixConfig(lib);
+    if (!cfg) return;
+    const data = matrixData(lib);
+    const names = data ? [...data.models.keys()] : [];
+    const model = names.includes(ui.matrixModel) ? ui.matrixModel : (names[0] || '');
+    const unit = cfg.value.unit || '副';
+    batchState.all = false;
+    batchState.model = model;
+    batchState.sphMin = '';
+    batchState.sphMax = '';
+    batchState.cyl = 'all';
+    batchState.qty = '';
+
+    const root = $('#sheetRoot');
+    root.innerHTML = `
+      <div class="sheet-backdrop" data-act="close-sheet"></div>
+      <div class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-grip"></div>
+        <div class="sheet-head">
+          <h2>批量改库存</h2>
+          <p>按型号、球镜范围、散光筛选，把库存一次改成同一个值。</p>
+        </div>
+        <div class="sheet-body">
+          <div class="form-field">
+            <label>范围</label>
+            <select id="btScope">
+              <option value="one" selected>当前型号（${esc(model)}）</option>
+              <option value="all">全部型号</option>
+            </select>
+          </div>
+          <div class="bt-grid">
+            <div class="form-field"><label>球镜下限</label><input id="btMin" placeholder="-4.00" autocomplete="off" /></div>
+            <div class="form-field"><label>球镜上限</label><input id="btMax" placeholder="-1.00" autocomplete="off" /></div>
+          </div>
+          <div class="form-field">
+            <label>散光</label>
+            <select id="btCyl">
+              <option value="all">不限散光</option>
+              <option value="has">有散光</option>
+              <option value="none">无散光</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label>库存改为（${esc(unit)}）</label>
+            <input id="btQty" type="number" min="0" max="9999" placeholder="0" autocomplete="off" />
+          </div>
+          <div class="bt-count">将影响 <b id="btCount">0 个规格</b></div>
+        </div>
+        <div class="sheet-actions">
+          <button type="button" class="btn ghost" data-act="close-sheet">取消</button>
+          <button type="button" class="btn primary" data-act="batch-apply">应用</button>
+        </div>
+      </div>`;
+    root.classList.add('open');
+    sheetOpen = true;
+
+    const sync = () => {
+      batchState.all = $('#btScope').value === 'all';
+      batchState.sphMin = $('#btMin').value;
+      batchState.sphMax = $('#btMax').value;
+      batchState.cyl = $('#btCyl').value;
+      batchState.qty = $('#btQty').value;
+      const n = batchEntries(lib, batchFilterOf(lib)).length;
+      const el = $('#btCount');
+      el.textContent = `${n} 个规格`;
+      el.classList.toggle('zero', n === 0);
+    };
+    ['btScope', 'btMin', 'btMax', 'btCyl', 'btQty'].forEach((id) => {
+      $('#' + id).addEventListener('input', sync);
+      $('#' + id).addEventListener('change', sync);
+    });
+    sync();
+  }
+
+  function applyBatch(lib) {
+    const f = batchFilterOf(lib);
+    if (!f) return;
+    const list = batchEntries(lib, f);
+    if (!list.length) { toast('没有匹配的规格'); return; }
+    const qty = Math.max(0, Math.round(Number(batchState.qty) || 0));
+    const prev = list.map((e) => ({ id: e.id, v: e.values[f.cfg.value.id] }));
+    list.forEach((e) => {
+      e.values[f.cfg.value.id] = String(qty);
+      e.updatedAt = now();
+    });
+    batchUndo = { libId: lib.id, fieldId: f.cfg.value.id, prev };
+    save();
+    closeSheet();
+    render();
+    toast(`已把 ${list.length} 个规格改成 ${qty} ${f.cfg.value.unit || '副'}，可点「撤销」`);
+  }
+
+  function undoBatch() {
+    if (!batchUndo) return;
+    const lib = libById(batchUndo.libId);
+    const undo = batchUndo;
+    batchUndo = null;
+    if (!lib) { render(); return; }
+    let n = 0;
+    undo.prev.forEach((p) => {
+      const e = lib.entries.find((x) => x.id === p.id);
+      if (e) { e.values[undo.fieldId] = p.v == null ? '' : p.v; n++; }
+    });
+    save();
+    render();
+    toast(`已撤销 ${n} 个规格的库存修改`);
+  }
+
   function alertRuleText(rule) {
     const lo = toPower(rule.sphMin);
     const hi = toPower(rule.sphMax);
@@ -1834,6 +2200,21 @@
           </button>
         </div>
 
+        ${hasSnap() ? `
+        <div class="block-title"><h3>恢复前快照</h3><span>${esc(snapTime())}</span></div>
+        <div class="settings-card">
+          <button class="settings-row" data-act="snap-undo">
+            <span class="s-ico">${icon('refresh', 17)}</span>
+            <span class="s-main"><b>撤销上次恢复</b><span>回到恢复数据之前的状态</span></span>
+            ${icon('chevron', 16)}
+          </button>
+          <button class="settings-row" data-act="snap-drop">
+            <span class="s-ico">${icon('trash', 17)}</span>
+            <span class="s-main"><b>丢弃快照</b><span>删除这份临时备份</span></span>
+            ${icon('chevron', 16)}
+          </button>
+        </div>` : ''}
+
         <div class="block-title"><h3>关于</h3><span>原型 v0.1</span></div>
         <div class="settings-card">
           <button class="settings-row" data-act="about">
@@ -1844,7 +2225,7 @@
         </div>
 
         <div class="about">
-          <b>Memento 原型</b><br />
+          <b>MyDB 原型</b><br />
           用网页快速验证交互，确认后 1:1 移植到 Android Compose
         </div>
       </div>
@@ -2803,7 +3184,7 @@
         { name: 'port', label: '端口', value: bk.port, placeholder: '默认端口（如 443 / 80）', hint: '自建 NAS 或反向代理才需要，填了会覆盖地址里的端口' },
         { name: 'user', label: '用户名', value: bk.user, placeholder: '留空表示不需要登录' },
         { name: 'pass', label: '密码 / 应用密码', type: 'password', value: bk.pass, placeholder: '建议用应用专用密码' },
-        { name: 'path', label: '远端目录', value: bk.path, placeholder: 'Memento', hint: '备份文件会保存为 目录/memento-backup.json' },
+        { name: 'path', label: '远端目录', value: bk.path, placeholder: 'MyDB', hint: '备份文件会保存为 目录/memento-backup.json' },
         { name: 'auto', label: '自动备份', type: 'select', value: bk.auto ? '1' : '', options: [{ value: '', label: '关闭' }, { value: '1', label: '每次修改后自动上传（约 4 秒）' }] }
       ],
       extraHTML: `
@@ -2898,7 +3279,7 @@
       try {
         const handle = await window.showSaveFilePicker({
           suggestedName: name,
-          types: [{ description: 'Memento 备份', accept: { 'application/json': ['.json'] } }]
+          types: [{ description: 'MyDB 备份', accept: { 'application/json': ['.json'] } }]
         });
         const writable = await handle.createWritable();
         await writable.write(new Blob([text], { type: 'application/json' }));
@@ -3303,6 +3684,37 @@
         setTimeout(() => alertsSheet(lib), 380);
         break;
       }
+      case 'restock': go({ name: 'restock', id: ui.route.id }); break;
+      case 'restock-text': { const lib = libById(ui.route.id); if (lib) restockTextSheet(lib); break; }
+      case 'restock-copy': {
+        const lib = libById(ui.route.id);
+        if (lib) {
+          const txt = restockText(lib, rsQty.plain, rsQty.cyl);
+          navigator.clipboard.writeText(txt).then(
+            () => toast('已复制补货文本'),
+            () => toast('复制失败，请手动选择文本')
+          );
+        }
+        break;
+      }
+      case 'restock-save': { const lib = libById(ui.route.id); if (lib) saveRestockTxt(lib); break; }
+      case 'batch': { const lib = libById(ui.route.id); if (lib) batchSheet(lib); break; }
+      case 'batch-apply': { const lib = libById(ui.route.id); if (lib) applyBatch(lib); break; }
+      case 'batch-undo': undoBatch(); break;
+      case 'search-use': {
+        const lib = libById(el.dataset.id);
+        ui.libSearch = el.dataset.q || '';
+        ui.limit = 60;
+        if (lib) {
+          pushSearch(lib.id, ui.libSearch);
+          ui.filter = 'all';
+        }
+        render();
+        break;
+      }
+      case 'search-clear': clearSearch(el.dataset.id); break;
+      case 'snap-undo': undoRestore(); break;
+      case 'snap-drop': dropSnap(); break;
       case 'list-fields': {
         const lib = libById(ui.route.id);
         if (lib) listFieldsSheet(lib);
@@ -3520,6 +3932,10 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sheetOpen) closeSheet();
+    if (e.key === 'Enter' && e.target.id === 'libSearch') {
+      const lib = libById(ui.route.id);
+      if (lib) pushSearch(lib.id, ui.libSearch);
+    }
   });
 
   render();

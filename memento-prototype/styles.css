@@ -14,10 +14,11 @@
   --amber-soft: #fff3e2;
   --danger: #d14343;
   --danger-soft: #fdecec;
-  --shadow-sm: 0 1px 2px rgba(16, 32, 48, .05), 0 2px 10px rgba(16, 32, 48, .04);
-  --shadow-md: 0 8px 24px rgba(16, 32, 48, .1);
+  /* 对齐 Android 端 MCard：白底 + 1px 描边，不使用投影 */
+  --shadow-sm: 0 0 0 1px var(--line);
+  --shadow-md: 0 0 0 1px var(--line);
   --radius: 18px;
-  --safe-bottom: 22px;
+  --safe-bottom: 0px;
   font-synthesis: none;
 }
 
@@ -26,9 +27,10 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: #e9edf3;
+  background: var(--bg);
   color: var(--text);
-  font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* 与 Android 一致：使用系统默认字体 */
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
@@ -37,46 +39,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button { border: 0; background: none; cursor: pointer; }
 input, select, textarea { outline: none; }
 
+/* 对齐 Android：全屏铺满，不再模拟手机外框 */
 .stage {
   min-height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 28px 16px;
-  background:
-    radial-gradient(900px 500px at 15% 0%, #dbe8f8 0%, transparent 60%),
-    radial-gradient(700px 500px at 90% 100%, #e3f5f0 0%, transparent 55%),
-    #e9edf3;
+  background: var(--bg);
 }
 
 .device {
   position: relative;
-  width: 390px;
-  height: 844px;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
   background: var(--bg);
-  border: 10px solid #10151c;
-  border-radius: 50px;
-  box-shadow:
-    0 40px 80px -20px rgba(9, 20, 33, .38),
-    0 0 0 1px rgba(255, 255, 255, .18) inset;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.statusbar {
-  height: 44px;
-  flex: 0 0 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px 0 30px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #10181f;
-  background: var(--bg);
-  position: relative;
-  z-index: 5;
-}
+/* Android 端状态栏由系统绘制，网页里不再模拟 */
+.statusbar { display: none; }
 .status-icons { display: flex; align-items: center; gap: 5px; }
 .status-icons svg { display: block; }
 
@@ -676,9 +657,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
   height: calc(68px + var(--safe-bottom));
   padding: 8px 18px var(--safe-bottom);
   display: flex; align-items: flex-start; justify-content: space-around;
-  background: rgba(255, 255, 255, .92);
-  backdrop-filter: blur(18px);
-  border-top: 1px solid rgba(231, 236, 242, .8);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
 }
 .tab {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -1100,3 +1080,78 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
   .fab { right: 16px; }
   .sheet { width: 100%; border-radius: 24px 24px 0 0; }
 }
+
+/* ---------- 对齐 Android 端：去掉网页独有效果 ---------- */
+/* 安卓 Compose 端没有模糊/毛玻璃，也没有 home indicator */
+.home-indicator { display: none; }
+.hero-avatar,
+.hero-chip,
+.search,
+.sheet-backdrop {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* 弹层在宽屏下不铺满整屏 */
+.sheet { width: min(560px, 100%); }
+
+/* ---------- 补货清单 ---------- */
+.rs-hint { padding: 8px 16px; font-size: 10.5px; color: var(--muted-2); }
+.rs-group {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 16px 7px;
+}
+.rs-group b { font-size: 13px; }
+.rs-group span { font-size: 10.5px; color: var(--muted-2); }
+.rs-group span.danger { color: var(--danger); font-weight: 600; }
+.rs-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 16px; background: var(--surface);
+  border-bottom: 1px solid var(--line); text-align: left;
+}
+.rs-row:active { background: var(--primary-soft); }
+.rs-sph { width: 64px; font-size: 14px; font-weight: 600; }
+.rs-cyl { width: 64px; font-size: 12px; color: var(--muted); }
+.rs-qty { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--amber); }
+.rs-qty.zero { color: var(--danger); }
+.rs-th { font-size: 10px; color: var(--muted-2); }
+.rs-foot { padding: 16px; }
+.rs-note { font-size: 10.5px; color: var(--muted-2); padding-bottom: 8px; }
+.rs-qty-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.rs-qty-row label {
+  flex: 1; display: flex; flex-direction: column; gap: 4px;
+  font-size: 11.5px; color: var(--muted);
+}
+.rs-qty-row input {
+  height: 40px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+}
+.rs-text {
+  margin: 0; padding: 12px; max-height: 300px; overflow: auto;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 19px;
+  background: var(--bg); border-radius: 14px; white-space: pre-wrap;
+}
+
+/* ---------- 批量改库存 ---------- */
+.bt-grid { display: flex; gap: 8px; }
+.bt-grid .form-field { flex: 1; }
+.bt-count {
+  font-size: 11.5px; color: var(--muted);
+  padding: 2px 2px 4px;
+}
+.bt-count b { color: var(--primary); }
+.bt-count b.zero { color: var(--danger); }
+.chip.undo {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: rgba(180, 83, 9, .35);
+}
+
+/* ---------- 搜索历史 ---------- */
+.search-history {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 16px 0;
+}
+.search-history > span { font-size: 10.5px; font-weight: 600; color: var(--muted-2); }
+.search-history > button { font-size: 10.5px; color: var(--primary); }
+.sh-chips { padding-top: 6px; }
