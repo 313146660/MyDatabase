@@ -239,22 +239,14 @@ fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
                                     }
                                 }
                                 Row(Modifier.padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    val now = System.currentTimeMillis()
-                                    val tomorrow9 = Calendar.getInstance().apply {
-                                        add(Calendar.DAY_OF_YEAR, 1)
-                                        set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
-                                    }.timeInMillis
-                                    listOf(
-                                        "1 小时后" to now + 3_600_000L,
-                                        "今晚 20:00" to Calendar.getInstance().apply {
-                                            set(Calendar.HOUR_OF_DAY, 20); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
-                                        }.timeInMillis,
-                                        "明天 09:00" to tomorrow9
-                                    ).forEach { (label, ts) ->
+                                    val presets = remember { Reminders.presets(ctx) }
+                                    presets.forEach { p ->
                                         Text(
-                                            label, fontSize = 10.5.sp, color = Primary,
+                                            p.label, fontSize = 10.5.sp, color = Primary,
                                             modifier = Modifier.clip(RoundedCornerShape(50)).background(PrimarySoft)
-                                                .clickable { values[f.id] = fmtStamp(ts) }
+                                                .clickable {
+                                                    values[f.id] = fmtStamp(p.timestamp(System.currentTimeMillis()))
+                                                }
                                                 .padding(horizontal = 9.dp, vertical = 3.dp)
                                         )
                                     }

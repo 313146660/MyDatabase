@@ -16,7 +16,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.mydb.BuildConfig
 import com.example.mydb.R
 import com.example.mydb.ui.*
 import com.example.mydb.ui.theme.*
@@ -34,7 +33,7 @@ fun AboutScreen(vm: AppViewModel) {
             Markdown(md)
             Spacer(Modifier.height(18.dp))
             Text(
-                "版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
+                "版本 ${appVersionName(ctx)}（${appVersionCode(ctx)}）",
                 fontSize = 11.sp, color = Muted2
             )
             Spacer(Modifier.height(40.dp))

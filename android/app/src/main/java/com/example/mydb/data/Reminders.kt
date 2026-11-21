@@ -18,7 +18,52 @@ import androidx.core.app.NotificationManagerCompat
 import com.example.mydb.MainActivity
 import com.example.mydb.R
 
-/** 提醒通知的个性化设置：铃声、震动、响铃时长 */
+/** 编辑提醒时的快捷预设，可在「我的 → 提醒」里修改 */
+data class ReminderPreset(
+    val label: String,
+    /** in = 若干分钟后，today = 今天某时刻，tomorrow = 明天某时刻 */
+    val kind: String,
+    val minutes: Int,
+    val hour: Int,
+    val minute: Int
+) {
+    fun timestamp(now: Long): Long {
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = now
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+            when (kind) {
+                "today" -> {
+                    set(java.util.Calendar.HOUR_OF_DAY, hour)
+                    set(java.util.Calendar.MINUTE, minute)
+                    if (timeInMillis <= now) add(java.util.Calendar.DAY_OF_YEAR, 1)
+                }
+                "tomorrow" -> {
+                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+                    set(java.util.Calendar.HOUR_OF_DAY, hour)
+                    set(java.util.Calendar.MINUTE, minute)
+                }
+                else -> add(java.util.Calendar.MINUTE, minutes.coerceIn(1, 60 * 24 * 30))
+            }
+        }
+        return cal.timeInMillis
+    }
+
+    fun describe(): String = when (kind) {
+        "today" -> "今天 %02d:%02d".format(hour, minute)
+        "tomorrow" -> "明天 %02d:%02d".format(hour, minute)
+        else -> if (minutes >= 60 && minutes % 60 == 0) "${minutes / 60} 小时后" else "$minutes 分钟后"
+    }
+
+    companion object {
+        fun defaults() = listOf(
+            ReminderPreset("1 小时后", "in", 60, 0, 0),
+            ReminderPreset("今晚 20:00", "today", 0, 20, 0),
+            ReminderPreset("明天 09:00", "tomorrow", 0, 9, 0)
+        )
+    }
+}
+
 data class ReminderCfg(
     /** "" = 系统默认，SILENT = 静音，其它为铃声 Uri */
     val sound: String = "",
@@ -55,6 +100,40 @@ object Reminders {
             .putInt("seconds", c.seconds)
             .apply()
         ensureChannel(ctx)
+    }
+
+    /** 编辑页的快捷预设，默认三条 */
+    fun presets(ctx: Context): List<ReminderPreset> {
+        val raw = ctx.getSharedPreferences(CFG, Context.MODE_PRIVATE).getString("presets", null)
+            ?: return ReminderPreset.defaults()
+        return runCatching {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                ReminderPreset(
+                    label = o.optString("label", "提醒"),
+                    kind = o.optString("kind", "in"),
+                    minutes = o.optInt("minutes", 60),
+                    hour = o.optInt("hour", 9),
+                    minute = o.optInt("minute", 0)
+                )
+            }
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: ReminderPreset.defaults()
+    }
+
+    fun setPresets(ctx: Context, list: List<ReminderPreset>) {
+        val arr = org.json.JSONArray()
+        list.forEach { p ->
+            arr.put(org.json.JSONObject().apply {
+                put("label", p.label)
+                put("kind", p.kind)
+                put("minutes", p.minutes)
+                put("hour", p.hour)
+                put("minute", p.minute)
+            })
+        }
+        ctx.getSharedPreferences(CFG, Context.MODE_PRIVATE).edit()
+            .putString("presets", arr.toString()).apply()
     }
 
     private fun soundUri(c: ReminderCfg): Uri? = when {

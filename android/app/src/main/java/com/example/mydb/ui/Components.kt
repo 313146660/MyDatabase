@@ -1,5 +1,7 @@
 package com.example.mydb.ui
 
+import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +34,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mydb.data.MLibrary
 import com.example.mydb.ui.theme.*
+
+/** 版本号统一从系统读取已安装包，保证「我的」「关于」与系统应用信息一致 */
+fun appVersionName(ctx: Context): String = runCatching {
+    ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "—"
+}.getOrNull() ?: "—"
+
+fun appVersionCode(ctx: Context): Long = runCatching {
+    val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+    if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+}.getOrNull() ?: 0L
 
 fun hexColor(hex: String?): Color {
     val h = (hex ?: "#1976D2").removePrefix("#")

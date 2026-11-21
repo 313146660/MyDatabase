@@ -1,6 +1,7 @@
 package com.example.mydb.ui.screens
 
 import android.app.Activity
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.media.RingtoneManager
 import android.net.Uri
@@ -34,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import com.example.mydb.BuildConfig
 import com.example.mydb.data.*
 import com.example.mydb.ui.*
 import com.example.mydb.ui.theme.*
@@ -64,6 +64,7 @@ private fun soundLabel(ctx: android.content.Context, c: ReminderCfg): String = w
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
     val rev = vm.rev
+    val ctx = LocalContext.current
     val libs = vm.state.libraries
     val total = libs.sumOf { it.entries.size }
     var showPwDlg by remember { mutableStateOf(false) }
@@ -89,7 +90,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     Text("MyDB", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text("${libs.size} 个数据库 · $total 条记录", color = Color.White.copy(alpha = 0.8f), fontSize = 11.5.sp)
                 }
-                Text("v${BuildConfig.VERSION_NAME}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                Text("v${appVersionName(ctx)}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
             }
             Spacer(Modifier.height(16.dp))
 
@@ -205,13 +206,13 @@ fun SettingsScreen(vm: AppViewModel) {
             Spacer(Modifier.height(16.dp))
             Text("关于", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
             MCard(Modifier.fillMaxWidth()) {
-                InfoRow("info", "关于 MyDB", "本地优先的个人数据库 · 版本 ${BuildConfig.VERSION_NAME}", Muted) { vm.go(Scr.About) }
+                InfoRow("info", "关于 MyDB", "本地优先的个人数据库 · 版本 ${appVersionName(ctx)}", Muted) { vm.go(Scr.About) }
                 DividerLine()
                 InfoRow("database", "数据说明", "数据保存在本机；换机前请先导出备份", Muted)
             }
             Spacer(Modifier.height(24.dp))
             Text(
-                "MyDB ${BuildConfig.VERSION_NAME} · 本地存储 · 不收集任何数据",
+                "MyDB ${appVersionName(ctx)} · 本地存储 · 不收集任何数据",
                 Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 10.5.sp, color = Muted2
             )
             Spacer(Modifier.height(30.dp))
@@ -229,6 +230,8 @@ private fun ReminderSettingsCard() {
     var canExact by remember { mutableStateOf(Reminders.canExact(ctx)) }
     var bgOk by remember { mutableStateOf(bgUnrestricted(ctx)) }
     var tested by remember { mutableStateOf(false) }
+    var presets by remember { mutableStateOf(Reminders.presets(ctx)) }
+    var editing by remember { mutableStateOf<Int?>(null) }
     LifecycleResumeEffect(Unit) {
         canNotify = Reminders.canNotify(ctx)
         canExact = Reminders.canExact(ctx)
@@ -305,6 +308,34 @@ private fun ReminderSettingsCard() {
                             }
                             .padding(horizontal = 13.dp, vertical = 6.dp)
                     )
+                }
+            }
+        }
+        DividerLine()
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("快捷预设", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMain)
+                    Text("编辑记录时可按这三个按钮快速设置提醒时间", fontSize = 10.5.sp, color = Muted2)
+                }
+                TextButton(onClick = {
+                    presets = ReminderPreset.defaults()
+                    Reminders.setPresets(ctx, presets)
+                }) { Text("恢复默认", fontSize = 11.sp) }
+            }
+            Spacer(Modifier.height(4.dp))
+            presets.forEachIndexed { i, p ->
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { editing = i }
+                        .padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("${i + 1}", fontSize = 10.sp, color = Muted2, modifier = Modifier.width(16.dp))
+                    Text(p.label, fontSize = 12.5.sp, color = TextMain, modifier = Modifier.weight(1f))
+                    Text(p.describe(), fontSize = 10.5.sp, color = Muted2)
+                    Text("修改", fontSize = 11.sp, color = Primary, modifier = Modifier.padding(start = 10.dp))
                 }
             }
         }
@@ -411,6 +442,100 @@ private fun ReminderSettingsCard() {
             }) { Text("开始测试", fontSize = 12.sp) }
         }
     }
+
+    val idx = editing
+    if (idx != null && presets.getOrNull(idx) != null) {
+        PresetDialog(
+            initial = presets[idx],
+            onDismiss = { editing = null },
+            onSave = { np ->
+                val list = presets.toMutableList().apply { set(idx, np) }
+                presets = list
+                Reminders.setPresets(ctx, list)
+            }
+        )
+    }
+}
+
+@Composable
+private fun PresetDialog(
+    initial: ReminderPreset,
+    onDismiss: () -> Unit,
+    onSave: (ReminderPreset) -> Unit
+) {
+    val ctx = LocalContext.current
+    var label by remember { mutableStateOf(initial.label) }
+    var kind by remember { mutableStateOf(initial.kind) }
+    var minutes by remember { mutableStateOf(initial.minutes.toString()) }
+    var hour by remember { mutableIntStateOf(initial.hour) }
+    var minute by remember { mutableIntStateOf(initial.minute) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑快捷预设", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it.take(10) },
+                    label = { Text("按钮名称", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("in" to "几小时后", "today" to "今天", "tomorrow" to "明天").forEach { (k, l) ->
+                        val on = kind == k
+                        Text(
+                            l, fontSize = 11.sp,
+                            color = if (on) Color.White else Primary,
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                .background(if (on) Primary else PrimarySoft)
+                                .clickable { kind = k }
+                                .padding(horizontal = 11.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                if (kind == "in") {
+                    OutlinedTextField(
+                        value = minutes,
+                        onValueChange = { minutes = it.filter { c -> c.isDigit() }.take(5) },
+                        label = { Text("多少分钟后", fontSize = 12.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Text(
+                        "时间：${"%02d:%02d".format(hour, minute)}",
+                        fontSize = 13.sp, color = Primary,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(PrimarySoft)
+                            .clickable {
+                                TimePickerDialog(ctx, { _, h, m -> hour = h; minute = m }, hour, minute, true).show()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val min = minutes.toIntOrNull()?.coerceIn(1, 43_200) ?: 60
+                val name = label.trim().ifBlank {
+                    when (kind) {
+                        "today" -> "今天 %02d:%02d".format(hour, minute)
+                        "tomorrow" -> "明天 %02d:%02d".format(hour, minute)
+                        else -> if (min >= 60 && min % 60 == 0) "${min / 60} 小时后" else "$min 分钟后"
+                    }
+                }
+                onSave(ReminderPreset(name, kind, min, hour, minute))
+                onDismiss()
+            }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 /* ---------------- 备份 ---------------- */
