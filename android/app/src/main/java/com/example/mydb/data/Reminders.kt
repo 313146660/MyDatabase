@@ -49,13 +49,16 @@ data class ReminderPreset(
         return cal.timeInMillis
     }
 
-    fun describe(): String = when (kind) {
-        "today" -> "今天 %02d:%02d".format(hour, minute)
-        "tomorrow" -> "明天 %02d:%02d".format(hour, minute)
-        else -> if (minutes >= 60 && minutes % 60 == 0) "${minutes / 60} 小时后" else "$minutes 分钟后"
-    }
+    fun describe(): String = autoLabel(kind, minutes, hour, minute)
 
     companion object {
+        /** 未自定义名称时使用的默认文案 */
+        fun autoLabel(kind: String, minutes: Int, hour: Int, minute: Int): String = when (kind) {
+            "today" -> "今天 %02d:%02d".format(hour, minute)
+            "tomorrow" -> "明天 %02d:%02d".format(hour, minute)
+            else -> if (minutes >= 60 && minutes % 60 == 0) "${minutes / 60} 小时后" else "$minutes 分钟后"
+        }
+
         fun defaults() = listOf(
             ReminderPreset("1 小时后", "in", 60, 0, 0),
             ReminderPreset("今晚 20:00", "today", 0, 20, 0),

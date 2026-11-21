@@ -465,10 +465,14 @@ private fun PresetDialog(
 ) {
     val ctx = LocalContext.current
     var label by remember { mutableStateOf(initial.label) }
+    var labelTouched by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf(initial.kind) }
     var minutes by remember { mutableStateOf(initial.minutes.toString()) }
     var hour by remember { mutableIntStateOf(initial.hour) }
     var minute by remember { mutableIntStateOf(initial.minute) }
+    val autoNow = ReminderPreset.autoLabel(
+        kind, minutes.toIntOrNull()?.coerceIn(1, 43_200) ?: 60, hour, minute
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -476,9 +480,9 @@ private fun PresetDialog(
         text = {
             Column {
                 OutlinedTextField(
-                    value = label,
-                    onValueChange = { label = it.take(10) },
-                    label = { Text("按钮名称", fontSize = 12.sp) },
+                    value = if (labelTouched) label else autoNow,
+                    onValueChange = { labelTouched = true; label = it.take(10) },
+                    label = { Text("按钮名称（留空跟随时间）", fontSize = 12.sp) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -523,13 +527,9 @@ private fun PresetDialog(
         confirmButton = {
             TextButton(onClick = {
                 val min = minutes.toIntOrNull()?.coerceIn(1, 43_200) ?: 60
-                val name = label.trim().ifBlank {
-                    when (kind) {
-                        "today" -> "今天 %02d:%02d".format(hour, minute)
-                        "tomorrow" -> "明天 %02d:%02d".format(hour, minute)
-                        else -> if (min >= 60 && min % 60 == 0) "${min / 60} 小时后" else "$min 分钟后"
-                    }
-                }
+                // 名称未手动改过时，随类型 / 时间自动更新，避免出现「今晚 20:00」却指向 17:00
+                val auto = ReminderPreset.autoLabel(kind, min, hour, minute)
+                val name = if (labelTouched && label.isNotBlank()) label.trim() else auto
                 onSave(ReminderPreset(name, kind, min, hour, minute))
                 onDismiss()
             }) { Text("保存") }
