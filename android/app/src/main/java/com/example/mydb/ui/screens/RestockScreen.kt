@@ -36,6 +36,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,14 +63,21 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
-    val items = remember(lib.id, dataKey) { restockItems(lib) }
+    val baseItems = remember(lib.id, dataKey) { restockItems(lib) }
+    // 本次手动调整后的数量：entryId -> 数量（0 表示本次不补）
+    val qtyAdj = remember(lib.id) { mutableStateMapOf<String, Int>() }
+    val items = remember(baseItems, qtyAdj.toMap()) {
+        val adj = qtyAdj.toMap()
+        baseItems.map { it.copy(restock = (adj[it.entry.id] ?: it.restock).coerceAtLeast(0)) }
+    }
+    val sendItems = items.filter { it.restock > 0 }
     val grouped = remember(items) { items.groupBy { it.model } }
     val unit = lib.fields.firstOrNull { it.name.contains("库存") }?.unit ?: "片"
     val cfg = remember(lib.id, dataKey) { restockCfgOf(lib) }
 
     var textOpen by rememberSaveable(lib.id) { mutableStateOf(false) }
-    val txt = remember(lib.id, dataKey) { restockText(lib) }
-    val bySupplier = remember(lib.id, dataKey) { restockTextBySupplier(lib) }
+    val txt = remember(lib.id, dataKey, qtyAdj.toMap()) { restockText(lib, qtyAdj.toMap()) }
+    val bySupplier = remember(lib.id, dataKey, qtyAdj.toMap()) { restockTextBySupplier(lib, qtyAdj.toMap()) }
     var groupBySupplier by rememberSaveable(lib.id) { mutableStateOf(false) }
     val supplierJoined = remember(bySupplier) {
         if (bySupplier.size <= 1) ""
@@ -92,7 +100,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                             it.write(("\uFEFF" + displayTxt).toByteArray(Charsets.UTF_8))
                         }
                     }
-                    vm.addRestockHistory(lib.id, displayTxt, items.sumOf { it.restock }, items.size, items)
+                    vm.addRestockHistory(lib.id, displayTxt, sendItems.sumOf { it.restock }, sendItems.size, sendItems)
                     vm.toast("已保存补货文本")
                 } catch (e: Exception) {
                     vm.toast("保存失败：" + (e.message ?: ""))
@@ -104,7 +112,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
     Column(Modifier.fillMaxSize().background(Bg)) {
         TopBar(
             title = "补货清单",
-            subtitle = "${lib.name} · ${items.size} 个规格需补货",
+            subtitle = "${lib.name} · ${sendItems.size} 个规格需补货",
             onBack = { vm.back() },
             trailing = {
                 IconButton(onClick = { vm.go(Scr.RestockHistory(lib.id)) }) {
@@ -121,7 +129,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
                 item {
                     Text(
-                        "点一行看这条规格的详情；下方可以生成发给供货商的文本。",
+                        "用 − / + 调整本次补货数量，点数字恢复默认，调到 0 表示本次不补；点一行看规格详情。",
                         fontSize = 11.sp, color = Muted2,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
@@ -170,13 +178,31 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                                     modifier = Modifier.padding(end = 4.dp))
                             }
                             Spacer(Modifier.weight(1f))
-                            Text(
-                                "补 ${item.restock} $unit",
-                                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = numColor
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("现 ${item.qty} · 目标 ${item.target}", fontSize = 10.sp, color = Muted2)
-                            AppIcon("chevron", 15.dp, Muted2)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    StepBtn("−", enabled = item.restock > 0) {
+                                        qtyAdj[item.entry.id] = (item.restock - 1).coerceAtLeast(0)
+                                    }
+                                    Text(
+                                        "${item.restock}",
+                                        fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                                        color = if (item.restock == 0) Muted2 else numColor,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.width(34.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { qtyAdj.remove(item.entry.id) }
+                                            .padding(vertical = 2.dp)
+                                    )
+                                    StepBtn("+") {
+                                        qtyAdj[item.entry.id] = (item.restock + 1).coerceAtMost(999)
+                                    }
+                                }
+                                Text(
+                                    "现 ${item.qty} · 目标 ${item.target}",
+                                    fontSize = 9.5.sp, color = Muted2,
+                                    modifier = Modifier.padding(top = 1.dp)
+                                )
+                            }
                         }
                         DividerLine()
                     }
@@ -193,7 +219,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                 Spacer(Modifier.height(6.dp))
                 val scopeText = if (cfg.scope == RESTOCK_SCOPE_LOW_STOCK) "仅低于提醒阈值" else "全部低于目标"
                 Text(
-                    "范围：$scopeText · 补货数 = 目标库存 − 当前库存",
+                    "范围：$scopeText · 补货数 = 目标库存 − 当前库存（可在清单上用 − / + 调整）",
                     fontSize = 10.5.sp, color = Muted2,
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
@@ -208,7 +234,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
                 Text("补货文本", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMain)
                 Text(
-                    "按型号分组，数量 = 目标库存 − 当前库存。点右上角「目标设置」调整各型号目标。",
+                    "按型号分组，数量取清单上的调整值；调到 0 的规格不会出现在文本里。",
                     fontSize = 11.5.sp, color = Muted2
                 )
                 if (bySupplier.size > 1) {
@@ -246,9 +272,9 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                 }
                 Spacer(Modifier.height(12.dp))
                 PillButton(
-                    "复制全部（${items.size} 个规格）",
+                    "复制全部（${sendItems.size} 个规格）",
                     onClick = {
-                        vm.addRestockHistory(lib.id, displayTxt, items.sumOf { it.restock }, items.size, items)
+                        vm.addRestockHistory(lib.id, displayTxt, sendItems.sumOf { it.restock }, sendItems.size, sendItems)
                         clipboard.setText(AnnotatedString(displayTxt))
                         vm.toast("已复制补货文本")
                     },
@@ -258,7 +284,7 @@ fun RestockScreen(vm: AppViewModel, libId: String) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
                         onClick = {
-                            vm.addRestockHistory(lib.id, displayTxt, items.sumOf { it.restock }, items.size, items)
+                            vm.addRestockHistory(lib.id, displayTxt, sendItems.sumOf { it.restock }, sendItems.size, sendItems)
                             shareRestockText(ctx, "${lib.name} 补货清单", displayTxt)
                         },
                         modifier = Modifier.weight(1f)
@@ -426,6 +452,22 @@ fun RestockConfigScreen(vm: AppViewModel, libId: String) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StepBtn(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.size(26.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (enabled) Teal.copy(alpha = 0.12f) else Line.copy(alpha = 0.5f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+            color = if (enabled) Teal else Muted2
+        )
     }
 }
 

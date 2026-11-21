@@ -570,9 +570,19 @@ fun restockItems(lib: MLibrary): List<RestockItem> {
 fun restockUnit(lib: MLibrary): String =
     lib.fields.firstOrNull { it.name.contains("库存") }?.unit?.takeIf { it.isNotBlank() } ?: "片"
 
+/** 按 entryId 覆盖补货数量（补货清单上手动 ± 调整），数量 ≤ 0 的规格从文本中剔除。 */
+fun applyRestockOverrides(list: List<RestockItem>, overrides: Map<String, Int>): List<RestockItem> {
+    if (overrides.isEmpty()) return list
+    return list.mapNotNull { it ->
+        val q = overrides[it.entry.id] ?: it.restock
+        if (q <= 0) null else it.copy(restock = q)
+    }
+}
+
 /** 生成发给供货商的纯文本：按型号分组，数量 = 目标库存 − 当前库存；含型号小计与合计。
- *  同型号内按度数浅→深排序，不在文本里加段标签。 */
-fun restockText(lib: MLibrary): String = buildRestockText(restockItems(lib), restockUnit(lib))
+ *  同型号内按度数浅→深排序，不在文本里加段标签。overrides 为清单上手动调整后的数量。 */
+fun restockText(lib: MLibrary, overrides: Map<String, Int> = emptyMap()): String =
+    buildRestockText(applyRestockOverrides(restockItems(lib), overrides), restockUnit(lib))
 
 private fun buildRestockText(list: List<RestockItem>, unit: String): String {
     val sb = StringBuilder()
@@ -589,11 +599,11 @@ private fun buildRestockText(list: List<RestockItem>, unit: String): String {
 }
 
 /** 按供货商分组生成补货文本：未填供货商的型号归「未分类」。返回 供货商名 -> 该组文本。 */
-fun restockTextBySupplier(lib: MLibrary): Map<String, String> {
+fun restockTextBySupplier(lib: MLibrary, overrides: Map<String, Int> = emptyMap()): Map<String, String> {
     val cfg = restockCfgOf(lib)
     val unit = restockUnit(lib)
     val groups = linkedMapOf<String, MutableList<RestockItem>>()
-    restockItems(lib).forEach { item ->
+    applyRestockOverrides(restockItems(lib), overrides).forEach { item ->
         val sup = cfg.suppliers[item.model]?.takeIf { it.isNotBlank() } ?: "未分类"
         groups.getOrPut(sup) { mutableListOf() }.add(item)
     }

@@ -52,6 +52,8 @@ fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
     val picked = remember(libId, entryId) { mutableSetOf<String>() }
     var pickField by remember { mutableStateOf<MField?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 关联选择字段可切换为手动输入文本
+    val manualPicks = remember { mutableStateMapOf<String, Boolean>() }
     val color = hexColor(lib.color)
 
     // 新记录默认填今天
@@ -121,11 +123,41 @@ fun EditorScreen(vm: AppViewModel, libId: String, entryId: String?) {
                                 f, values[f.id] ?: "", multi = true,
                                 onChange = { values[f.id] = it }
                             )
-                            FieldType.PICK -> PickInput(
-                                lib = lib, field = f, value = values[f.id] ?: "",
-                                onPick = { pickField = f },
-                                onClear = { values[f.id] = ""; picked.remove(f.id) }
-                            )
+                            FieldType.PICK -> Column {
+                                PickInput(
+                                    lib = lib, field = f, value = values[f.id] ?: "",
+                                    onPick = { pickField = f },
+                                    onClear = { values[f.id] = ""; picked.remove(f.id) }
+                                )
+                                val manual = manualPicks[f.id] == true
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        if (manual) "收起手动输入" else "或手动输入文本",
+                                        fontSize = 10.sp, color = Primary,
+                                        modifier = Modifier.clip(RoundedCornerShape(50))
+                                            .clickable { manualPicks[f.id] = !manual }
+                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                    if (manual) {
+                                        Text(
+                                            "手动填写的内容不关联库存",
+                                            fontSize = 9.5.sp, color = Muted2,
+                                            modifier = Modifier.padding(start = 4.dp)
+                                        )
+                                    }
+                                }
+                                if (manual) {
+                                    Spacer(Modifier.height(5.dp))
+                                    AppTextField(
+                                        values[f.id] ?: "",
+                                        { values[f.id] = it; picked.remove(f.id) },
+                                        placeholder = "输入${f.name}"
+                                    )
+                                }
+                            }
                             FieldType.LONGTEXT -> AppTextField(
                                 values[f.id] ?: "", { values[f.id] = it }, placeholder = "填写备注…",
                                 singleLine = false, minLines = 3
@@ -396,7 +428,7 @@ private fun PickSheet(
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.86f).padding(horizontal = 18.dp)) {
             Text("选择${field.name}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMain)
             Text(
-                if (field.pick?.kind == "sku") "从镜片库挑选规格，保存后会扣库存" else "从关联库挑选一个值",
+                if (field.pick?.kind == "sku") "从镜片库挑选规格，保存后会扣库存；也可关闭后手动输入" else "从关联库挑选一个值，也可关闭后手动输入",
                 fontSize = 11.sp, color = Muted2
             )
             Spacer(Modifier.height(10.dp))
